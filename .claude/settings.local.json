@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:modelscope.cn)",
+      "WebSearch",
+      "Bash(dir:*)",
+      "Bash(python test:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(.venvScriptsactivate)",
+      "Bash(./venv/Scripts/pip install flask openai)",
+      "Bash(./venv/Scripts/pip list)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(choco install:*)",
+      "Bash(where choco)",
+      "Bash(where:*)",
+      "Bash(.\\venv\\Scripts\\python:*)",
+      "Bash(findstr:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

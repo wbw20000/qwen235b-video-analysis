@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qwen3-VL 视频分析助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 900px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            background: #f8f9ff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            margin-bottom: 25px;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f1ff;
+        }
+
+        .upload-area.dragover {
+            background: #e8e9ff;
+            border-color: #764ba2;
+        }
+
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 15px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: bold;
+        }
+
+        .input-group input, .input-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+        }
+
+        .input-group input:focus, .input-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-group textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
+        }
+
+        .fps-input {
+            width: 100px;
+        }
+
+        .selected-file {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .selected-file.show {
+            display: block;
+        }
+
+        .result-area {
+            background: #f8f9ff;
+            padding: 25px;
+            border-radius: 12px;
+            margin-top: 25px;
+            display: none;
+        }
+
+        .result-area.show {
+            display: block;
+        }
+
+        .result-title {
+            color: #667eea;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+
+        .result-content {
+            color: #333;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        .tips {
+            background: #fff3e0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 4px solid #ff9800;
+        }
+
+        .tips-title {
+            font-weight: bold;
+            color: #f57c00;
+            margin-bottom: 8px;
+        }
+
+        .tips ul {
+            margin-left: 20px;
+            color: #666;
+        }
+
+        .tips li {
+            margin-bottom: 5px;
+        }
+
+        /* 进度条样式 */
+        .progress-container {
+            display: none;
+            margin-top: 25px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 12px;
+        }
+
+        .progress-container.show {
+            display: block;
+        }
+
+        .progress-item {
+            margin-bottom: 20px;
+        }
+
+        .progress-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .progress-percent {
+            color: #667eea;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 25px;
+            background: #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .progress-message {
+            margin-top: 8px;
+            font-size: 0.9em;
+            color: #666;
+            font-style: italic;
+        }
+
+        .progress-title {
+            color: #667eea;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Qwen3-VL 视频分析助手</h1>
+        <p class="subtitle">通过阿里云 DashScope API 调用 Qwen3-VL 模型</p>
+
+        <form id="uploadForm" enctype="multipart/form-data">
+            <!-- 上传区域 -->
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <p><strong>点击或拖拽视频文件到这里</strong></p>
+                <p style="color: #999; margin-top: 10px;">支持格式: MP4, AVI, MKV, MOV, FLV, WMV</p>
+                <input type="file" id="videoFile" name="video" class="file-input" accept=".mp4,.avi,.mkv,.mov,.flv,.wmv">
+            </div>
+
+            <!-- 选中的文件 -->
+            <div class="selected-file" id="selectedFile">
+                <strong>已选择:</strong> <span id="fileName"></span>
+            </div>
+
+            <!-- 模型选择 -->
+            <div class="input-group">
+                <label for="model">选择模型:</label>
+                <select id="model" name="model" style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em;">
+                    <option value="qwen-vl-plus">Qwen-VL-Plus（推荐，性价比高）</option>
+                    <option value="qwen3-vl-plus">Qwen3-VL-Plus（最新版本）</option>
+                    <option value="qwen-vl-max">Qwen-VL-Max（最强视觉理解能力）</option>
+                </select>
+                <small style="color: #666; margin-top: 8px; display: block;">不同模型的性能和价格不同，推荐使用 Qwen-VL-Plus</small>
+            </div>
+
+            <!-- 提问区域 -->
+            <div class="input-group">
+                <label for="prompt">您的问题:</label>
+                <textarea id="prompt" name="prompt" placeholder="例如: 请详细描述这个视频中发生了什么，包括场景、人物动作和关键事件。">请详细描述这个视频中发生了什么。</textarea>
+            </div>
+
+            <!-- 自动压缩选项 -->
+            <div class="input-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="autoCompress" name="auto_compress" checked style="width: auto; margin-right: 10px;">
+                    <span>自动压缩大视频（>7MB 自动压缩到 6.5MB）</span>
+                </label>
+                <small style="color: #666; margin-top: 8px; display: block;">
+                    ⚠️ 需要安装 FFmpeg。启用后，大于 7MB 的视频会自动压缩以符合 API 限制。
+                </small>
+            </div>
+
+            <!-- 提交按钮 -->
+            <button type="submit" class="btn btn-primary" id="submitBtn">
+                🚀 开始分析
+            </button>
+        </form>
+
+        <!-- 进度条 -->
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-title">📊 处理进度</div>
+
+            <!-- 压缩进度 -->
+            <div class="progress-item" id="compressProgressItem" style="display: none;">
+                <div class="progress-label">
+                    <span>🗜️ 视频压缩</span>
+                    <span class="progress-percent" id="compressPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="compressBar" style="width: 0%;">0%</div>
+                </div>
+                <div class="progress-message" id="compressMessage">等待开始...</div>
+            </div>
+
+            <!-- 上传分析进度 -->
+            <div class="progress-item" id="uploadProgressItem" style="display: none;">
+                <div class="progress-label">
+                    <span>📤 AI 分析</span>
+                    <span class="progress-percent" id="uploadPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="uploadBar" style="width: 0%;">0%</div>
+                </div>
+                <div class="progress-message" id="uploadMessage">等待开始...</div>
+            </div>
+        </div>
+
+        <!-- 错误提示 -->
+        <div class="error" id="error"></div>
+
+        <!-- 结果显示 -->
+        <div class="result-area" id="resultArea">
+            <div class="result-title">📊 分析结果</div>
+            <div class="result-content" id="resultContent"></div>
+
+            <!-- 压缩视频下载 -->
+            <div id="compressedInfo" style="display: none; margin-top: 20px; padding: 15px; background: #e8f5e9; border-radius: 8px;">
+                <div style="font-weight: bold; color: #2e7d32; margin-bottom: 10px;">✅ 视频已自动压缩</div>
+                <div style="color: #666; margin-bottom: 10px;">
+                    <span id="sizeInfo"></span>
+                </div>
+                <a id="downloadBtn" href="#" class="btn btn-primary" download style="display: inline-block; text-decoration: none;">
+                    📥 下载压缩后的视频
+                </a>
+            </div>
+        </div>
+
+        <!-- 使用提示 -->
+        <div class="tips">
+            <div class="tips-title">💡 使用提示</div>
+            <ul>
+                <li>✨ <strong>实时进度显示</strong> - 压缩和上传进度实时更新，清晰可见</li>
+                <li>📥 <strong>下载压缩视频</strong> - 压缩后的视频可以下载保存，方便：
+                    <ul style="margin-top: 5px;">
+                        <li>• 切换模型再次分析，无需重复压缩</li>
+                        <li>• 修改提问后快速重新分析</li>
+                        <li>• 保存为小文件便于存储和分享</li>
+                    </ul>
+                </li>
+                <li>⚠️ <strong>视频大小限制: 建议 < 7MB</strong>（API限制base64编码后不超过10MB）</li>
+                <li>🗜️ <strong>自动视频压缩</strong> - 大于 7MB 的视频会自动压缩到 6.5MB</li>
+                <li>🔧 自动压缩需要安装 FFmpeg（<a href="https://ffmpeg.org/download.html" target="_blank" style="color: #667eea;">下载地址</a>）</li>
+                <li>使用阿里云 DashScope API，无需本地部署大模型</li>
+                <li>支持 2 秒到 20 分钟的视频（MP4, AVI, MKV, MOV, FLV, WMV）</li>
+                <li>可以针对视频内容提出具体问题，如"视频中有哪些交通标志？"</li>
+                <li>API 调用按使用量计费，请参考阿里云定价</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('videoFile');
+        const selectedFile = document.getElementById('selectedFile');
+        const fileName = document.getElementById('fileName');
+        const uploadForm = document.getElementById('uploadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const resultArea = document.getElementById('resultArea');
+        const resultContent = document.getElementById('resultContent');
+
+        // 点击上传区域
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // 文件选择
+        fileInput.addEventListener('change', (e) => {
+            handleFileSelect(e.target.files[0]);
+        });
+
+        // 拖拽上传
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFileSelect(e.dataTransfer.files[0]);
+        });
+
+        function handleFileSelect(file) {
+            if (file) {
+                // 检查文件大小（建议小于7MB）
+                const maxSize = 7 * 1024 * 1024; // 7MB
+                const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+
+                fileName.textContent = file.name + ` (${fileSizeMB} MB)`;
+                selectedFile.classList.add('show');
+                error.classList.remove('show');
+                resultArea.classList.remove('show');
+
+                // 如果文件太大，显示警告
+                if (file.size > maxSize) {
+                    showError(`视频文件较大（${fileSizeMB} MB），建议压缩到 7MB 以下。文件过大可能导致上传失败！`);
+                }
+            }
+        }
+
+        // 进度条元素
+        const progressContainer = document.getElementById('progressContainer');
+        const compressProgressItem = document.getElementById('compressProgressItem');
+        const compressBar = document.getElementById('compressBar');
+        const compressPercent = document.getElementById('compressPercent');
+        const compressMessage = document.getElementById('compressMessage');
+        const uploadProgressItem = document.getElementById('uploadProgressItem');
+        const uploadBar = document.getElementById('uploadBar');
+        const uploadPercent = document.getElementById('uploadPercent');
+        const uploadMessage = document.getElementById('uploadMessage');
+
+        let currentEventSource = null;
+
+        // 更新进度条
+        function updateProgress(type, progress, message) {
+            if (type === 'compress') {
+                compressProgressItem.style.display = 'block';
+                compressBar.style.width = progress + '%';
+                compressBar.textContent = progress + '%';
+                compressPercent.textContent = progress + '%';
+                compressMessage.textContent = message || '';
+            } else if (type === 'upload') {
+                uploadProgressItem.style.display = 'block';
+                uploadBar.style.width = progress + '%';
+                uploadBar.textContent = progress + '%';
+                uploadPercent.textContent = progress + '%';
+                uploadMessage.textContent = message || '';
+            }
+        }
+
+        // 重置进度条
+        function resetProgress() {
+            progressContainer.classList.remove('show');
+            compressProgressItem.style.display = 'none';
+            uploadProgressItem.style.display = 'none';
+            compressBar.style.width = '0%';
+            uploadBar.style.width = '0%';
+            compressPercent.textContent = '0%';
+            uploadPercent.textContent = '0%';
+            compressMessage.textContent = '等待开始...';
+            uploadMessage.textContent = '等待开始...';
+        }
+
+        // 表单提交
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // 验证
+            if (!fileInput.files[0]) {
+                showError('请先选择一个视频文件');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video', fileInput.files[0]);
+            formData.append('prompt', document.getElementById('prompt').value);
+            formData.append('model', document.getElementById('model').value);
+            formData.append('auto_compress', document.getElementById('autoCompress').checked);
+
+            // 重置状态
+            submitBtn.disabled = true;
+            error.classList.remove('show');
+            resultArea.classList.remove('show');
+            resetProgress();
+            progressContainer.classList.add('show');
+
+            // 关闭之前的 EventSource
+            if (currentEventSource) {
+                currentEventSource.close();
+            }
+
+            try {
+                // 第一步：提交任务获取 session_id
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    showError(data.error || '提交失败，请重试');
+                    submitBtn.disabled = false;
+                    progressContainer.classList.remove('show');
+                    return;
+                }
+
+                const sessionId = data.session_id;
+
+                // 第二步：建立 SSE 连接接收进度
+                currentEventSource = new EventSource(`/progress/${sessionId}`);
+
+                currentEventSource.onmessage = function(event) {
+                    try {
+                        const progressData = JSON.parse(event.data);
+
+                        if (progressData.type === 'compress') {
+                            // 压缩进度更新
+                            updateProgress('compress', progressData.progress, progressData.message);
+                        } else if (progressData.type === 'upload') {
+                            // 上传分析进度更新
+                            updateProgress('upload', progressData.progress, progressData.message);
+                        } else if (progressData.type === 'complete') {
+                            // 任务完成
+                            currentEventSource.close();
+                            submitBtn.disabled = false;
+
+                            // 显示结果
+                            resultContent.textContent = progressData.result;
+                            resultArea.classList.add('show');
+
+                            // 如果有压缩视频，显示下载链接
+                            const compressedInfo = document.getElementById('compressedInfo');
+                            if (progressData.compressed_video) {
+                                const sizeInfo = document.getElementById('sizeInfo');
+                                sizeInfo.textContent = `原始大小: ${progressData.original_size}, 压缩后: ${progressData.compressed_size}`;
+
+                                const downloadBtn = document.getElementById('downloadBtn');
+                                downloadBtn.href = `/download/${progressData.compressed_video}`;
+                                downloadBtn.download = progressData.compressed_video;
+
+                                compressedInfo.style.display = 'block';
+                            } else {
+                                compressedInfo.style.display = 'none';
+                            }
+
+                            // 隐藏进度条
+                            setTimeout(() => {
+                                progressContainer.classList.remove('show');
+                            }, 2000);
+
+                        } else if (progressData.type === 'error') {
+                            // 错误
+                            currentEventSource.close();
+                            submitBtn.disabled = false;
+                            showError(progressData.message);
+                            progressContainer.classList.remove('show');
+                        }
+                    } catch (err) {
+                        console.error('解析进度数据失败:', err);
+                    }
+                };
+
+                currentEventSource.onerror = function(err) {
+                    console.error('SSE 连接错误:', err);
+                    currentEventSource.close();
+                    submitBtn.disabled = false;
+                    showError('连接中断，请重试');
+                    progressContainer.classList.remove('show');
+                };
+
+            } catch (err) {
+                showError('网络错误: ' + err.message);
+                submitBtn.disabled = false;
+                progressContainer.classList.remove('show');
+            }
+        });
+
+        function showError(message) {
+            error.textContent = '❌ ' + message;
+            error.classList.add('show');
+        }
+    </script>
+</body>
+</html>
