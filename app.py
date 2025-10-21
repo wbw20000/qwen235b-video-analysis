@@ -171,6 +171,20 @@ def compress_video(input_path, output_path, target_size_mb=6.5, session_id=None)
         # 获取输入文件大小，用于更准确的进度估算
         input_size_mb = os.path.getsize(input_path) / (1024 * 1024)
 
+        # 动态设定分辨率/帧率策略（随目标码率降低）
+        scale_width = None
+        output_fps = None
+        if target_bitrate < 220:
+            scale_width = 480
+            output_fps = 15
+        elif target_bitrate < 350:
+            scale_width = 640
+            output_fps = 20
+        elif target_bitrate < 600:
+            scale_width = 854
+        elif target_bitrate < 1000:
+            scale_width = 1280
+
         # 检测是否支持 NVIDIA GPU 加速
         use_gpu = check_nvenc_support()
 
@@ -196,6 +210,19 @@ def compress_video(input_path, output_path, target_size_mb=6.5, session_id=None)
                 '-y',
                 output_path
             ]
+            # 动态过滤器（覆盖默认 -vf），在 GPU 路径下也允许使用 CPU 过滤器以达到更小体积
+            if 'compress_cmd' in locals():
+                if scale_width or output_fps:
+                    _filters = []
+                    if scale_width:
+                        _filters.append(f'scale={scale_width}:-2')
+                    if output_fps:
+                        _filters.append(f'fps={output_fps}')
+                    try:
+                        compress_cmd.insert(-1, '-filter:v')
+                        compress_cmd.insert(-1, ','.join(_filters))
+                    except Exception:
+                        pass
 
             # GPU 加速大约每秒处理 2-5 秒的视频内容（比CPU快3-10倍）
             estimated_time = duration / 2.0  # 秒
@@ -218,6 +245,19 @@ def compress_video(input_path, output_path, target_size_mb=6.5, session_id=None)
                 '-y',
                 output_path
             ]
+            # 动态过滤器（覆盖默认 -vf）
+            if 'compress_cmd' in locals():
+                if scale_width or output_fps:
+                    _filters = []
+                    if scale_width:
+                        _filters.append(f'scale={scale_width}:-2')
+                    if output_fps:
+                        _filters.append(f'fps={output_fps}')
+                    try:
+                        compress_cmd.insert(-1, '-filter:v')
+                        compress_cmd.insert(-1, ','.join(_filters))
+                    except Exception:
+                        pass
 
             # CPU 大约每秒处理 0.3 秒的视频内容
             estimated_time = duration / 0.3  # 秒
@@ -442,6 +482,11 @@ def analyze_video_with_api(video_path, prompt, model='qwen-vl-plus', session_id=
         # API限制：base64编码后不能超过10MB
         # 由于base64编码会增加约33%的大小，原始文件应该小于7.5MB
         max_original_size = 7.5 * 1024 * 1024  # 7.5MB
+        # 使用可配置的阈值覆盖默认 7.5MB（为 base64 增长预留）
+        try:
+            max_original_size = TARGET_ORIGINAL_MB * 1024 * 1024
+        except Exception:
+            pass
         if video_size > max_original_size:
             raise ValueError(
                 f"视频文件太大（{video_size_mb:.2f} MB）！\n"
