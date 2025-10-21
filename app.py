@@ -33,6 +33,11 @@ MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_VIDEO_SIZE
 
+# 上传到 API 的原始视频目标大小（为 base64 增长预留裕量）
+TARGET_ORIGINAL_MB = float(os.getenv('TARGET_ORIGINAL_MB', '7.2'))
+# 自适应压缩最大重试次数
+MAX_COMPRESS_RETRY = int(os.getenv('MAX_COMPRESS_RETRY', '3'))
+
 # 创建上传文件夹
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -638,11 +643,52 @@ def analyze():
                     compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
 
                     # 压缩视频（带进度）
-                    success = compress_video(filepath, compressed_path, target_size_mb=6.5, session_id=session_id)
+                    target_size_mb = 6.5
+                    success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
 
                     if success:
                         print(f"使用压缩后的视频: {compressed_filename}")
                         final_video_path = compressed_path
+                        # 自适应多轮压缩，直至满足上传阈值
+                        try:
+                            current_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
+                        except Exception:
+                            current_size_mb = None
+
+                        retry = 0
+                        while current_size_mb is not None and current_size_mb > TARGET_ORIGINAL_MB and retry < MAX_COMPRESS_RETRY:
+                            retry += 1
+                            # 动态调整目标大小：按比例收缩并留 10% 裕量，避免边界震荡
+                            ratio = TARGET_ORIGINAL_MB / max(current_size_mb, 0.01)
+                            new_target = max(1.0, target_size_mb * ratio * 0.9)  # 不低于 1MB，避免过低异常
+
+                            print(f"压缩后仍为 {current_size_mb:.2f} MB，开始第 {retry} 次自适应压缩，目标 {new_target:.2f} MB")
+                            progress_queues[session_id].put({
+                                'type': 'compress',
+                                'progress': 15,
+                                'message': f'进一步压缩第{retry}次，目标 {new_target:.2f}MB'
+                            })
+
+                            # 以原始文件为输入，覆盖输出，避免多次转码累积失真
+                            target_size_mb = new_target
+                            success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
+                            if not success:
+                                print("自适应压缩失败，保留上一版本压缩结果")
+                                break
+
+                            try:
+                                current_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
+                            except Exception:
+                                current_size_mb = None
+
+                        if current_size_mb is not None:
+                            print(f"最终压缩文件大小: {current_size_mb:.2f} MB（阈值 {TARGET_ORIGINAL_MB:.2f} MB）")
+                            if current_size_mb > TARGET_ORIGINAL_MB:
+                                progress_queues[session_id].put({
+                                    'type': 'compress',
+                                    'progress': 95,
+                                    'message': f'仍高于阈值({current_size_mb:.2f}MB>{TARGET_ORIGINAL_MB:.2f}MB)，将尝试上传，如失败请考虑截断时长或再次压缩'
+                                })
                     else:
                         print("压缩失败，使用原视频")
 
