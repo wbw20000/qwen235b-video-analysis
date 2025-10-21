@@ -59,6 +59,18 @@ def allowed_file(filename):
     """检查文件扩展名是否允许"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def get_remote_model_id(model_key: str) -> str:
+    """根据本地模型键获取远端模型 ID，可用环境变量覆盖。
+    环境变量命名：MODEL_ID_{KEY_UPPER_UNDERSCORE}
+    例如：MODEL_ID_QWEN3_VL_235B_A22B_THINKING / MODEL_ID_QWEN_VLMAX_20250813
+    未设置则返回原始键值。
+    """
+    try:
+        env_key = 'MODEL_ID_' + re.sub(r'[^A-Z0-9_]', '_', model_key.upper())
+        return os.getenv(env_key, model_key)
+    except Exception:
+        return model_key
+
 def encode_video_to_base64(video_path):
     """
     将视频文件编码为 base64 字符串
@@ -469,7 +481,8 @@ def analyze_video_with_api(video_path, prompt, model='qwen-vl-plus', session_id=
         send_progress(0, '开始分析视频...')
 
         print(f"开始分析视频: {video_path}")
-        print(f"使用模型: {model}")
+        remote_model = get_remote_model_id(model)
+        print(f"使用模型: {model} -> {remote_model}")
         print(f"用户提问: {prompt}")
 
         # 检查视频文件大小
@@ -542,7 +555,7 @@ def analyze_video_with_api(video_path, prompt, model='qwen-vl-plus', session_id=
         send_progress(40, '正在上传到AI模型...')
 
         completion = client.chat.completions.create(
-            model=model,
+            model=remote_model,
             messages=messages,
         )
 
@@ -640,7 +653,10 @@ def analyze():
 
         # 验证模型选择
         if model not in AVAILABLE_MODELS:
-            model = 'qwen-vl-plus'
+            # 允许额外的模型键（未在 AVAILABLE_MODELS 中展示）
+            extra_allowed = {'qwen3-vl-235b-a22b-thinking', 'qwen-vlmax-20250813'}
+            if model not in extra_allowed:
+                model = 'qwen-vl-plus'
 
         # 保存文件
         filename = file.filename
