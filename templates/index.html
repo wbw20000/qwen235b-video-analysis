@@ -362,6 +362,98 @@
                 <small style="color: #666; margin-top: 8px; display: block;">不同模型的性能和价格不同，推荐使用 Qwen-VL-Plus</small>
             </div>
 
+            <!-- ==================== 新增：抽帧策略选择 ==================== -->
+            <div class="input-group">
+                <label for="samplingStrategy">抽帧策略:</label>
+                <select id="samplingStrategy" name="sampling_strategy"
+                        style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em;">
+                    <option value="full_video">📹 完整视频（当前默认方式）</option>
+                    <option value="accident_analysis" selected>🚗 交通事故分析（智能多级采样）</option>
+                    <option value="uniform_fps">⏱️ 均匀采样（固定FPS）</option>
+                    <option value="scene_detection">🎬 场景变化检测</option>
+                    <option value="keyframe_only">🖼️ 关键帧提取</option>
+                    <option value="custom">⚙️ 自定义配置</option>
+                </select>
+                <small style="color: #666; margin-top: 8px; display: block;">
+                    💡 选择适合的抽帧策略可大幅提升分析速度和精度
+                </small>
+            </div>
+
+            <!-- 交通事故分析专用参数（当选择accident_analysis时显示） -->
+            <div class="input-group" id="accidentParamsArea" style="display: block;">
+                <label>交通事故分析配置:</label>
+                <div style="padding: 15px; background: #fff3e0; border-radius: 8px; border: 1px solid #ff9800;">
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="detectAccidentTime" checked
+                                   style="width: auto; margin-right: 10px;">
+                            <span>🕒 精确定位事故时间点</span>
+                        </label>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="trackTrajectory" checked
+                                   style="width: auto; margin-right: 10px;">
+                            <span>📍 追踪参与者轨迹</span>
+                        </label>
+                    </div>
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="analyzeEnvironment" checked
+                                   style="width: auto; margin-right: 10px;">
+                            <span>🌤️ 分析环境条件（天气/路面/车道）</span>
+                        </label>
+                    </div>
+                    <div>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="generateVisualization"
+                                   style="width: auto; margin-right: 10px;">
+                            <span>📊 生成轨迹可视化图（需本地处理）</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 均匀采样参数（当选择uniform_fps时显示） -->
+            <div class="input-group" id="uniformParamsArea" style="display: none;">
+                <label for="uniformFps">采样帧率 (FPS):</label>
+                <input type="number" id="uniformFps" name="uniform_fps" value="1" min="0.1" max="30" step="0.1"
+                       style="width: 150px; padding: 8px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                <small style="color: #666; margin-left: 10px;">
+                    提取每秒N帧，如1 FPS = 每秒1帧
+                </small>
+            </div>
+
+            <!-- 关键帧参数（当选择keyframe_only时显示） -->
+            <div class="input-group" id="keyframeParamsArea" style="display: none;">
+                <label for="keyframeCount">提取关键帧数量:</label>
+                <input type="number" id="keyframeCount" name="keyframe_count" value="16" min="4" max="128" step="4"
+                       style="width: 150px; padding: 8px; border: 2px solid #e0e0e0; border-radius: 8px;">
+                <small style="color: #666; margin-left: 10px;">
+                    从视频中均匀提取N个关键帧
+                </small>
+            </div>
+
+            <!-- 场景检测参数说明 -->
+            <div class="input-group" id="sceneParamsArea" style="display: none;">
+                <div style="padding: 15px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e0e0e0;">
+                    <p style="color: #666; margin: 0;">使用PySceneDetect自动检测场景变化，提取场景边界帧。</p>
+                </div>
+            </div>
+
+            <!-- 自定义配置 -->
+            <div class="input-group" id="customParamsArea" style="display: none;">
+                <label>自定义JSON配置:</label>
+                <textarea id="customConfig"
+                          style="width: 100%; min-height: 100px; margin-top: 8px; padding: 10px;
+                                 border: 2px solid #e0e0e0; border-radius: 8px; font-family: monospace;"
+                          placeholder='{"fps": 1, "max_frames": 64, "method": "uniform"}'></textarea>
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    高级用户可自定义JSON配置参数
+                </small>
+            </div>
+            <!-- ==================== 新增结束 ==================== -->
+
             <!-- 提问区域 -->
             <div class="input-group">
                 <label for="prompt">您的问题:</label>
@@ -399,6 +491,18 @@
                     <div class="progress-bar" id="compressBar" style="width: 0%;">0%</div>
                 </div>
                 <div class="progress-message" id="compressMessage">等待开始...</div>
+            </div>
+
+            <!-- 抽帧进度 -->
+            <div class="progress-item" id="samplingProgressItem" style="display: none;">
+                <div class="progress-label">
+                    <span>🎞️ 视频抽帧</span>
+                    <span class="progress-percent" id="samplingPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="samplingBar" style="width: 0%;">0%</div>
+                </div>
+                <div class="progress-message" id="samplingMessage">等待开始...</div>
             </div>
 
             <!-- 上传分析进度 -->
@@ -480,6 +584,14 @@
         const resultArea = document.getElementById('resultArea');
         const resultContent = document.getElementById('resultContent');
 
+        // 抽帧策略相关元素
+        const samplingStrategy = document.getElementById('samplingStrategy');
+        const accidentParamsArea = document.getElementById('accidentParamsArea');
+        const uniformParamsArea = document.getElementById('uniformParamsArea');
+        const keyframeParamsArea = document.getElementById('keyframeParamsArea');
+        const sceneParamsArea = document.getElementById('sceneParamsArea');
+        const customParamsArea = document.getElementById('customParamsArea');
+
         // 保存用户输入的URL，防止丢失
         let savedVideoUrl = '';
 
@@ -511,6 +623,50 @@
                 compressOption.style.display = 'none';
                 selectedFile.classList.remove('show');
                 error.classList.remove('show');
+            }
+        });
+
+        // ==================== 抽帧策略切换逻辑 ====================
+        samplingStrategy.addEventListener('change', function() {
+            const strategy = this.value;
+
+            // 隐藏所有参数区域
+            accidentParamsArea.style.display = 'none';
+            uniformParamsArea.style.display = 'none';
+            keyframeParamsArea.style.display = 'none';
+            sceneParamsArea.style.display = 'none';
+            customParamsArea.style.display = 'none';
+
+            // 根据选择显示对应参数
+            switch(strategy) {
+                case 'full_video':
+                    // 完整视频，无需额外参数
+                    break;
+
+                case 'accident_analysis':
+                    // 交通事故分析
+                    accidentParamsArea.style.display = 'block';
+                    break;
+
+                case 'uniform_fps':
+                    // 均匀采样
+                    uniformParamsArea.style.display = 'block';
+                    break;
+
+                case 'scene_detection':
+                    // 场景检测
+                    sceneParamsArea.style.display = 'block';
+                    break;
+
+                case 'keyframe_only':
+                    // 关键帧提取
+                    keyframeParamsArea.style.display = 'block';
+                    break;
+
+                case 'custom':
+                    // 自定义配置
+                    customParamsArea.style.display = 'block';
+                    break;
             }
         });
 
@@ -564,6 +720,10 @@
         const compressBar = document.getElementById('compressBar');
         const compressPercent = document.getElementById('compressPercent');
         const compressMessage = document.getElementById('compressMessage');
+        const samplingProgressItem = document.getElementById('samplingProgressItem');
+        const samplingBar = document.getElementById('samplingBar');
+        const samplingPercent = document.getElementById('samplingPercent');
+        const samplingMessage = document.getElementById('samplingMessage');
         const uploadProgressItem = document.getElementById('uploadProgressItem');
         const uploadBar = document.getElementById('uploadBar');
         const uploadPercent = document.getElementById('uploadPercent');
@@ -579,6 +739,12 @@
                 compressBar.textContent = progress + '%';
                 compressPercent.textContent = progress + '%';
                 compressMessage.textContent = message || '';
+            } else if (type === 'sampling') {
+                samplingProgressItem.style.display = 'block';
+                samplingBar.style.width = progress + '%';
+                samplingBar.textContent = progress + '%';
+                samplingPercent.textContent = progress + '%';
+                samplingMessage.textContent = message || '';
             } else if (type === 'upload') {
                 uploadProgressItem.style.display = 'block';
                 uploadBar.style.width = progress + '%';
@@ -592,12 +758,16 @@
         function resetProgress() {
             progressContainer.classList.remove('show');
             compressProgressItem.style.display = 'none';
+            samplingProgressItem.style.display = 'none';
             uploadProgressItem.style.display = 'none';
             compressBar.style.width = '0%';
+            samplingBar.style.width = '0%';
             uploadBar.style.width = '0%';
             compressPercent.textContent = '0%';
+            samplingPercent.textContent = '0%';
             uploadPercent.textContent = '0%';
             compressMessage.textContent = '等待开始...';
+            samplingMessage.textContent = '等待开始...';
             uploadMessage.textContent = '等待开始...';
         }
 
@@ -638,6 +808,28 @@
             formData.append('input_method', inputMethod);
             formData.append('prompt', document.getElementById('prompt').value);
             formData.append('model', document.getElementById('model').value);
+
+            // ==================== 新增：抽帧策略参数 ====================
+            formData.append('sampling_strategy', document.getElementById('samplingStrategy').value);
+
+            // 根据策略添加对应参数
+            const strategy = document.getElementById('samplingStrategy').value;
+            if (strategy === 'accident_analysis') {
+                formData.append('detect_accident_time', document.getElementById('detectAccidentTime').checked);
+                formData.append('track_trajectory', document.getElementById('trackTrajectory').checked);
+                formData.append('analyze_environment', document.getElementById('analyzeEnvironment').checked);
+                formData.append('generate_visualization', document.getElementById('generateVisualization').checked);
+            } else if (strategy === 'uniform_fps') {
+                formData.append('uniform_fps', document.getElementById('uniformFps').value);
+            } else if (strategy === 'keyframe_only') {
+                formData.append('keyframe_count', document.getElementById('keyframeCount').value);
+            } else if (strategy === 'custom') {
+                const customConfigElem = document.getElementById('customConfig');
+                if (customConfigElem) {
+                    formData.append('custom_config', customConfigElem.value);
+                }
+            }
+            // ==================== 新增结束 ====================
 
             if (inputMethod === 'upload') {
                 formData.append('video', fileInput.files[0]);

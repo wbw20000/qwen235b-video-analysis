@@ -23,6 +23,29 @@ import threading
 from queue import Queue
 from openai import OpenAI
 
+# 新增：视频抽帧相关导入
+import cv2
+import numpy as np
+from PIL import Image
+import tempfile
+import shutil
+from datetime import datetime
+
+# 可选：高级抽帧库
+try:
+    import decord
+    HAS_DECORD = True
+except ImportError:
+    HAS_DECORD = False
+    print("警告: 未安装decord，将使用OpenCV提取帧（速度较慢）")
+
+try:
+    from scenedetect import detect, ContentDetector
+    HAS_SCENEDETECT = True
+except ImportError:
+    HAS_SCENEDETECT = False
+    print("警告: 未安装scenedetect，场景检测功能将不可用")
+
 app = Flask(__name__)
 
 # 配置
@@ -52,7 +75,9 @@ DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY', 'sk-5175677ff9b4459aa45ce7ec2
 AVAILABLE_MODELS = {
     'qwen-vl-max': 'Qwen-VL-Max（最强视觉理解能力）',
     'qwen-vl-plus': 'Qwen-VL-Plus（推荐，性价比高）',
-    'qwen3-vl-plus': 'Qwen3-VL-Plus（最新版本）'
+    'qwen3-vl-plus': 'Qwen3-VL-Plus（最新版本）',
+    'qwen3-vl-32b-instruct': 'Qwen3-VL-32B-Instruct（阿里云部署）',
+    'qwen3-vl-32b-thinking': 'Qwen3-VL-32B-Thinking（阿里云部署，思维链模式）'
 }
 
 def allowed_file(filename):
@@ -448,12 +473,300 @@ def compress_video(input_path, output_path, target_size_mb=6.5, session_id=None)
             })
         return False
 
-def analyze_video_with_api(video_path, prompt, model='qwen-vl-plus', session_id=None):
+# ============================================================
+# 视频抽帧模块
+# ============================================================
+
+def extract_frames_uniform(video_path, fps=1.0, max_frames=None, session_id=None):
+    """
+    均匀采样：按固定FPS提取帧
+
+    Args:
+        video_path: 视频文件路径
+        fps: 采样帧率（每秒提取几帧）
+        max_frames: 最大帧数限制
+        session_id: 会话ID，用于进度推送
+
+    Returns:
+        list: 提取的帧列表（PIL Image对象）
+        dict: 元数据（时间戳、帧号等）
+    """
+    def send_progress(percent, message):
+        if session_id and session_id in progress_queues:
+            progress_queues[session_id].put({
+                'type': 'sampling',
+                'progress': percent,
+                'message': message
+            })
+
+    try:
+        send_progress(0, '开始提取帧...')
+
+        # 使用OpenCV打开视频
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError("无法打开视频文件")
+
+        # 获取视频信息
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / video_fps
+
+        print(f"视频信息: FPS={video_fps}, 总帧数={total_frames}, 时长={duration:.2f}秒")
+        send_progress(10, f'视频时长{duration:.2f}秒，开始提取...')
+
+        # 计算采样间隔
+        frame_interval = int(video_fps / fps)
+
+        frames = []
+        metadata = {
+            'timestamps': [],
+            'frame_indices': [],
+            'video_fps': video_fps,
+            'total_frames': total_frames,
+            'duration': duration
+        }
+
+        frame_count = 0
+        extracted_count = 0
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # 按间隔提取帧
+            if frame_count % frame_interval == 0:
+                # 转换BGR到RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(frame_rgb)
+
+                frames.append(pil_image)
+                metadata['timestamps'].append(frame_count / video_fps)
+                metadata['frame_indices'].append(frame_count)
+
+                extracted_count += 1
+
+                # 更新进度
+                progress = int(10 + (frame_count / total_frames) * 80)
+                send_progress(progress, f'已提取 {extracted_count} 帧...')
+
+                # 检查是否达到最大帧数
+                if max_frames and extracted_count >= max_frames:
+                    break
+
+            frame_count += 1
+
+        cap.release()
+
+        print(f"提取完成：共提取 {len(frames)} 帧")
+        send_progress(100, f'提取完成，共{len(frames)}帧')
+
+        return frames, metadata
+
+    except Exception as e:
+        print(f"提取帧失败: {str(e)}")
+        send_progress(0, f'提取失败: {str(e)}')
+        raise
+
+
+def extract_frames_keyframes(video_path, num_keyframes=16, session_id=None):
+    """
+    关键帧提取：均匀提取N个关键帧
+
+    Args:
+        video_path: 视频文件路径
+        num_keyframes: 提取的关键帧数量
+        session_id: 会话ID
+
+    Returns:
+        list: 提取的帧列表
+        dict: 元数据
+    """
+    def send_progress(percent, message):
+        if session_id and session_id in progress_queues:
+            progress_queues[session_id].put({
+                'type': 'sampling',
+                'progress': percent,
+                'message': message
+            })
+
+    try:
+        send_progress(0, '开始提取关键帧...')
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError("无法打开视频文件")
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+
+        # 计算均匀间隔
+        indices = np.linspace(0, total_frames - 1, num_keyframes, dtype=int)
+
+        frames = []
+        metadata = {
+            'timestamps': [],
+            'frame_indices': [],
+            'video_fps': video_fps,
+            'total_frames': total_frames
+        }
+
+        for i, frame_idx in enumerate(indices):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(frame_rgb)
+
+                frames.append(pil_image)
+                metadata['timestamps'].append(frame_idx / video_fps)
+                metadata['frame_indices'].append(int(frame_idx))
+
+                progress = int(10 + (i / len(indices)) * 90)
+                send_progress(progress, f'提取关键帧 {i+1}/{num_keyframes}...')
+
+        cap.release()
+
+        print(f"关键帧提取完成：{len(frames)} 帧")
+        send_progress(100, f'提取完成，共{len(frames)}个关键帧')
+
+        return frames, metadata
+
+    except Exception as e:
+        print(f"提取关键帧失败: {str(e)}")
+        send_progress(0, f'提取失败: {str(e)}')
+        raise
+
+
+def extract_frames_accident_analysis(video_path, config, session_id=None):
+    """
+    交通事故分析专用抽帧策略
+    实现四阶段采样（简化版）
+
+    Args:
+        video_path: 视频文件路径
+        config: 配置字典
+        session_id: 会话ID
+
+    Returns:
+        list: 提取的帧列表（按阶段分组）
+        dict: 元数据（包含各阶段信息）
+    """
+    def send_progress(percent, message):
+        if session_id and session_id in progress_queues:
+            progress_queues[session_id].put({
+                'type': 'sampling',
+                'progress': percent,
+                'message': message
+            })
+
+    try:
+        send_progress(0, '交通事故分析：阶段1 - 粗扫描...')
+
+        # 阶段1：粗粒度扫描（1 FPS）
+        frames_stage1, meta1 = extract_frames_uniform(
+            video_path,
+            fps=1.0,
+            max_frames=600,  # 最多10分钟
+            session_id=None  # 不重复推送进度
+        )
+
+        send_progress(25, f'阶段1完成：扫描{len(frames_stage1)}帧')
+
+        # 阶段2：选择关键时间段的帧（模拟事故时刻检测）
+        # 这里简化为选择视频中段的高密度采样
+        duration = meta1['duration']
+        accident_time = duration / 2  # 假设事故在中间
+
+        send_progress(50, '阶段2：精确定位事故时刻...')
+
+        # 提取事故时刻附近的密集帧（±10秒）
+        frames_stage2 = []
+        for i, ts in enumerate(meta1['timestamps']):
+            if abs(ts - accident_time) <= 10:  # 事故前后10秒
+                frames_stage2.append(frames_stage1[i])
+
+        send_progress(75, f'阶段2完成：定位到{len(frames_stage2)}帧')
+
+        # 阶段3：环境分析关键帧（选择5个代表帧）
+        num_env_frames = min(5, len(frames_stage1))
+        env_indices = np.linspace(0, len(frames_stage1)-1, num_env_frames, dtype=int)
+        frames_stage3 = [frames_stage1[i] for i in env_indices]
+
+        send_progress(90, '阶段3：提取环境分析帧...')
+
+        # 合并所有帧（去重）
+        all_frames = list(dict.fromkeys(frames_stage1 + frames_stage2 + frames_stage3))
+
+        metadata = {
+            'strategy': 'accident_analysis',
+            'total_frames': len(all_frames),
+            'stage1_frames': len(frames_stage1),
+            'stage2_frames': len(frames_stage2),
+            'stage3_frames': len(frames_stage3),
+            'video_duration': duration,
+            'estimated_accident_time': accident_time,
+            'config': config
+        }
+
+        send_progress(100, f'事故分析完成：共{len(all_frames)}帧')
+
+        return all_frames, metadata
+
+    except Exception as e:
+        print(f"事故分析抽帧失败: {str(e)}")
+        send_progress(0, f'抽帧失败: {str(e)}')
+        raise
+
+
+def frames_to_base64_images(frames, max_size_mb=10):
+    """
+    将帧列表转换为base64编码的图片列表（用于API调用）
+
+    Args:
+        frames: PIL Image列表
+        max_size_mb: 最大总大小（MB）
+
+    Returns:
+        list: base64编码的图片URL列表
+    """
+    import io
+
+    base64_images = []
+    total_size = 0
+
+    for i, frame in enumerate(frames):
+        # 转换为JPEG并压缩
+        buffer = io.BytesIO()
+        frame.save(buffer, format='JPEG', quality=85)
+        img_bytes = buffer.getvalue()
+
+        # 编码为base64
+        img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        img_url = f"data:image/jpeg;base64,{img_base64}"
+
+        # 检查大小
+        img_size_mb = len(img_base64) / (1024 * 1024)
+        if total_size + img_size_mb > max_size_mb:
+            print(f"警告：已达到{max_size_mb}MB限制，停止添加更多帧（已处理{i}帧）")
+            break
+
+        base64_images.append(img_url)
+        total_size += img_size_mb
+
+    print(f"转换完成：{len(base64_images)}帧，总大小{total_size:.2f}MB")
+    return base64_images
+
+
+def analyze_video_with_api(video_path=None, video_url=None, prompt='请详细描述这个视频中发生了什么。', model='qwen-vl-plus', session_id=None):
     """
     使用阿里云 DashScope API 分析视频内容
 
     Args:
-        video_path: 视频文件路径
+        video_path: 视频文件路径（本地上传方式）
+        video_url: 视频URL（URL方式，支持最大2GB）
         prompt: 用户提问
         model: 使用的模型名称
         session_id: 会话ID，用于进度推送
@@ -480,75 +793,103 @@ def analyze_video_with_api(video_path, prompt, model='qwen-vl-plus', session_id=
 
         send_progress(0, '开始分析视频...')
 
-        print(f"开始分析视频: {video_path}")
         remote_model = get_remote_model_id(model)
         print(f"使用模型: {model} -> {remote_model}")
         print(f"用户提问: {prompt}")
 
-        # 检查视频文件大小
-        video_size = os.path.getsize(video_path)
-        video_size_mb = video_size / (1024 * 1024)
-        print(f"视频文件大小: {video_size_mb:.2f} MB")
+        # 判断使用URL方式还是本地文件方式
+        if video_url:
+            # URL方式 - 支持最大2GB视频
+            print(f"使用URL方式分析视频: {video_url}")
+            send_progress(10, '使用URL方式，准备调用API...')
 
-        send_progress(5, f'准备上传视频 ({video_size_mb:.2f}MB)...')
+            # 构建请求消息 - URL方式
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "video_url",
+                            "video_url": {
+                                "url": video_url
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                    ]
+                }
+            ]
 
-        # API限制：base64编码后不能超过10MB
-        # 由于base64编码会增加约33%的大小，原始文件应该小于7.5MB
-        max_original_size = 7.5 * 1024 * 1024  # 7.5MB
-        # 使用可配置的阈值覆盖默认 7.5MB（为 base64 增长预留）
-        try:
-            max_original_size = TARGET_ORIGINAL_MB * 1024 * 1024
-        except Exception:
-            pass
-        if video_size > max_original_size:
-            raise ValueError(
-                f"视频文件太大（{video_size_mb:.2f} MB）！\n"
-                f"DashScope API 限制 base64 编码后的视频不能超过 10MB。\n"
-                f"建议：\n"
-                f"1. 使用视频压缩工具压缩视频\n"
-                f"2. 截取较短的视频片段（建议 < 7MB）\n"
-                f"3. 降低视频分辨率或帧率"
-            )
+        else:
+            # 本地文件方式 - base64编码
+            print(f"开始分析视频: {video_path}")
 
-        # 编码视频为 base64
-        print("正在编码视频...")
-        send_progress(10, '正在编码视频...')
-        base64_video = encode_video_to_base64(video_path)
-        base64_size_mb = len(base64_video) / (1024 * 1024)
-        print(f"视频编码完成，base64 大小: {base64_size_mb:.2f} MB")
-        send_progress(30, f'视频编码完成 ({base64_size_mb:.2f}MB)')
+            # 检查视频文件大小
+            video_size = os.path.getsize(video_path)
+            video_size_mb = video_size / (1024 * 1024)
+            print(f"视频文件大小: {video_size_mb:.2f} MB")
 
-        # 再次检查编码后的大小
-        if len(base64_video) > 10 * 1024 * 1024:
-            raise ValueError(
-                f"编码后视频太大（{base64_size_mb:.2f} MB），超过 API 限制（10MB）！\n"
-                f"请压缩视频或使用更短的片段。"
-            )
+            send_progress(5, f'准备上传视频 ({video_size_mb:.2f}MB)...')
+
+            # API限制：base64编码后不能超过10MB
+            # 由于base64编码会增加约33%的大小，原始文件应该小于7.5MB
+            max_original_size = 7.5 * 1024 * 1024  # 7.5MB
+            # 使用可配置的阈值覆盖默认 7.5MB（为 base64 增长预留）
+            try:
+                max_original_size = TARGET_ORIGINAL_MB * 1024 * 1024
+            except Exception:
+                pass
+            if video_size > max_original_size:
+                raise ValueError(
+                    f"视频文件太大（{video_size_mb:.2f} MB）！\n"
+                    f"DashScope API 限制 base64 编码后的视频不能超过 10MB。\n"
+                    f"建议：\n"
+                    f"1. 使用视频压缩工具压缩视频\n"
+                    f"2. 截取较短的视频片段（建议 < 7MB）\n"
+                    f"3. 降低视频分辨率或帧率"
+                )
+
+            # 编码视频为 base64
+            print("正在编码视频...")
+            send_progress(10, '正在编码视频...')
+            base64_video = encode_video_to_base64(video_path)
+            base64_size_mb = len(base64_video) / (1024 * 1024)
+            print(f"视频编码完成，base64 大小: {base64_size_mb:.2f} MB")
+            send_progress(30, f'视频编码完成 ({base64_size_mb:.2f}MB)')
+
+            # 再次检查编码后的大小
+            if len(base64_video) > 10 * 1024 * 1024:
+                raise ValueError(
+                    f"编码后视频太大（{base64_size_mb:.2f} MB），超过 API 限制（10MB）！\n"
+                    f"请压缩视频或使用更短的片段。"
+                )
+
+            # 构建请求消息 - base64方式
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "video_url",
+                            "video_url": {
+                                "url": f"data:video/mp4;base64,{base64_video}"
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                    ]
+                }
+            ]
 
         # 创建 OpenAI 客户端（兼容模式）
         client = OpenAI(
             api_key=DASHSCOPE_API_KEY,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
-
-        # 构建请求消息
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "video_url",
-                        "video_url": {
-                            "url": f"data:video/mp4;base64,{base64_video}"
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    },
-                ]
-            }
-        ]
 
         # 调用 API
         print("正在调用 DashScope API...")
@@ -575,6 +916,91 @@ def analyze_video_with_api(video_path, prompt, model='qwen-vl-plus', session_id=
         print("详细错误信息:")
         print(traceback.format_exc())
         raise Exception(error_msg)
+
+
+def analyze_images_with_api(base64_images, prompt='请分析这些图片。', model='qwen-vl-plus', session_id=None):
+    """
+    使用阿里云 DashScope API 分析多张图片
+
+    Args:
+        base64_images: base64编码的图片URL列表
+        prompt: 用户提问
+        model: 使用的模型名称
+        session_id: 会话ID
+
+    Returns:
+        str: 模型分析结果
+    """
+    try:
+        def send_progress(percent, message):
+            if session_id and session_id in progress_queues:
+                progress_queues[session_id].put({
+                    'type': 'upload',
+                    'progress': percent,
+                    'message': message
+                })
+
+        send_progress(0, '准备发送图片到AI模型...')
+
+        # 检查 API Key
+        if not DASHSCOPE_API_KEY:
+            raise ValueError("未设置 DASHSCOPE_API_KEY！")
+
+        remote_model = get_remote_model_id(model)
+        print(f"使用模型: {model} -> {remote_model}")
+        print(f"分析图片数量: {len(base64_images)}")
+
+        # 构建消息内容（多图）
+        content = []
+        for img_url in base64_images:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": img_url}
+            })
+
+        # 添加文本提问
+        content.append({
+            "type": "text",
+            "text": prompt
+        })
+
+        messages = [
+            {
+                "role": "user",
+                "content": content
+            }
+        ]
+
+        # 创建 OpenAI 客户端
+        client = OpenAI(
+            api_key=DASHSCOPE_API_KEY,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+
+        send_progress(40, f'上传{len(base64_images)}张图片到AI模型...')
+
+        # 调用 API
+        completion = client.chat.completions.create(
+            model=remote_model,
+            messages=messages,
+        )
+
+        send_progress(90, 'AI正在分析图片...')
+
+        # 获取结果
+        result = completion.choices[0].message.content
+        print("多图分析完成！")
+        send_progress(100, '分析完成！')
+
+        return result
+
+    except Exception as e:
+        import traceback
+        error_msg = f"多图API调用失败: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        raise Exception(error_msg)
+
 
 @app.route('/')
 def index():
@@ -632,36 +1058,60 @@ def progress(session_id):
 def analyze():
     """处理视频分析请求 - 立即返回session_id，后台处理"""
     try:
-        # 检查是否有文件
-        if 'video' not in request.files:
-            return jsonify({'error': '未找到视频文件'}), 400
-
-        file = request.files['video']
-
-        # 检查文件名
-        if file.filename == '':
-            return jsonify({'error': '未选择文件'}), 400
-
-        # 检查文件类型
-        if not allowed_file(file.filename):
-            return jsonify({'error': f'不支持的文件格式，请上传: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+        # 获取输入方式
+        input_method = request.form.get('input_method', 'upload')  # 'upload' 或 'url'
 
         # 获取用户提问和模型选择
         prompt = request.form.get('prompt', '请详细描述这个视频中发生了什么。')
         model = request.form.get('model', 'qwen-vl-plus')
-        auto_compress = request.form.get('auto_compress', 'true').lower() == 'true'
+
+        # 根据输入方式处理
+        video_url = None
+        filepath = None
+        filename = None
+        auto_compress = False
+
+        if input_method == 'url':
+            # URL方式
+            video_url = request.form.get('video_url', '').strip()
+            if not video_url:
+                return jsonify({'error': '请提供视频URL'}), 400
+
+            # 验证URL格式
+            if not video_url.startswith(('http://', 'https://')):
+                return jsonify({'error': '请提供有效的HTTP/HTTPS视频URL'}), 400
+
+            print(f"收到URL方式请求: {video_url}")
+
+        else:
+            # 上传文件方式
+            # 检查是否有文件
+            if 'video' not in request.files:
+                return jsonify({'error': '未找到视频文件'}), 400
+
+            file = request.files['video']
+
+            # 检查文件名
+            if file.filename == '':
+                return jsonify({'error': '未选择文件'}), 400
+
+            # 检查文件类型
+            if not allowed_file(file.filename):
+                return jsonify({'error': f'不支持的文件格式，请上传: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+
+            auto_compress = request.form.get('auto_compress', 'true').lower() == 'true'
+
+            # 保存文件
+            filename = file.filename
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
 
         # 验证模型选择
         if model not in AVAILABLE_MODELS:
             # 允许额外的模型键（未在 AVAILABLE_MODELS 中展示）
-            extra_allowed = {'qwen3-vl-235b-a22b-thinking', 'qwen-vlmax-20250813'}
+            extra_allowed = {'qwen3-vl-235b-a22b-thinking', 'qwen-vlmax-20250813', 'qwen3-vl-32b-instruct', 'qwen3-vl-32b-thinking'}
             if model not in extra_allowed:
                 model = 'qwen-vl-plus'
-
-        # 保存文件
-        filename = file.filename
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
 
         # 生成唯一的会话ID
         session_id = f"{int(time.time() * 1000)}_{os.getpid()}"
@@ -673,105 +1123,181 @@ def analyze():
         def process_video():
             compressed_path = None
             try:
-                file_size_mb = os.path.getsize(filepath) / (1024*1024)
+                if video_url:
+                    # URL方式 - 直接分析
+                    print(f"\n{'='*60}")
+                    print(f"收到视频分析请求 (Session: {session_id})")
+                    print(f"视频URL: {video_url}")
+                    print(f"输入方式: URL (支持最大2GB)")
+                    print(f"{'='*60}\n")
 
-                print(f"\n{'='*60}")
-                print(f"收到视频分析请求 (Session: {session_id})")
-                print(f"视频文件: {filename}")
-                print(f"保存路径: {filepath}")
-                print(f"文件大小: {file_size_mb:.2f} MB")
-                print(f"自动压缩: {auto_compress}")
-                print(f"{'='*60}\n")
+                    # 直接分析URL
+                    result = analyze_video_with_api(video_url=video_url, prompt=prompt, model=model, session_id=session_id)
 
-                # 检查是否需要压缩
-                final_video_path = filepath
-                compressed_filename = None
+                    response_data = {
+                        'type': 'complete',
+                        'success': True,
+                        'result': result,
+                        'video_source': video_url,
+                        'model': model,
+                        'input_method': 'url'
+                    }
 
-                if auto_compress and file_size_mb > 7.0:
-                    print("视频文件较大，开始自动压缩...")
+                    # 推送完成消息
+                    progress_queues[session_id].put(response_data)
 
-                    # 检查 FFmpeg
-                    if not check_ffmpeg():
-                        progress_queues[session_id].put({
-                            'type': 'error',
-                            'message': '未安装 FFmpeg！请先安装 FFmpeg 以使用视频压缩功能。'
-                        })
-                        return
+                else:
+                    # 上传文件方式
+                    file_size_mb = os.path.getsize(filepath) / (1024*1024)
 
-                    # 生成压缩后的文件名
-                    name, ext = os.path.splitext(filename)
-                    compressed_filename = f"{name}_compressed{ext}"
-                    compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
+                    print(f"\n{'='*60}")
+                    print(f"收到视频分析请求 (Session: {session_id})")
+                    print(f"视频文件: {filename}")
+                    print(f"保存路径: {filepath}")
+                    print(f"文件大小: {file_size_mb:.2f} MB")
+                    print(f"自动压缩: {auto_compress}")
+                    print(f"{'='*60}\n")
 
-                    # 压缩视频（带进度）
-                    target_size_mb = 6.5
-                    success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
+                    # 检查是否需要压缩
+                    final_video_path = filepath
+                    compressed_filename = None
 
-                    if success:
-                        print(f"使用压缩后的视频: {compressed_filename}")
-                        final_video_path = compressed_path
-                        # 自适应多轮压缩，直至满足上传阈值
-                        try:
-                            current_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
-                        except Exception:
-                            current_size_mb = None
+                    if auto_compress and file_size_mb > 7.0:
+                        print("视频文件较大，开始自动压缩...")
 
-                        retry = 0
-                        while current_size_mb is not None and current_size_mb > TARGET_ORIGINAL_MB and retry < MAX_COMPRESS_RETRY:
-                            retry += 1
-                            # 动态调整目标大小：按比例收缩并留 10% 裕量，避免边界震荡
-                            ratio = TARGET_ORIGINAL_MB / max(current_size_mb, 0.01)
-                            new_target = max(1.0, target_size_mb * ratio * 0.9)  # 不低于 1MB，避免过低异常
-
-                            print(f"压缩后仍为 {current_size_mb:.2f} MB，开始第 {retry} 次自适应压缩，目标 {new_target:.2f} MB")
+                        # 检查 FFmpeg
+                        if not check_ffmpeg():
                             progress_queues[session_id].put({
-                                'type': 'compress',
-                                'progress': 15,
-                                'message': f'进一步压缩第{retry}次，目标 {new_target:.2f}MB'
+                                'type': 'error',
+                                'message': '未安装 FFmpeg！请先安装 FFmpeg 以使用视频压缩功能。'
                             })
+                            return
 
-                            # 以原始文件为输入，覆盖输出，避免多次转码累积失真
-                            target_size_mb = new_target
-                            success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
-                            if not success:
-                                print("自适应压缩失败，保留上一版本压缩结果")
-                                break
+                        # 生成压缩后的文件名
+                        name, ext = os.path.splitext(filename)
+                        compressed_filename = f"{name}_compressed{ext}"
+                        compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
 
+                        # 压缩视频（带进度）
+                        target_size_mb = 6.5
+                        success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
+
+                        if success:
+                            print(f"使用压缩后的视频: {compressed_filename}")
+                            final_video_path = compressed_path
+                            # 自适应多轮压缩，直至满足上传阈值
                             try:
                                 current_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
                             except Exception:
                                 current_size_mb = None
 
-                        if current_size_mb is not None:
-                            print(f"最终压缩文件大小: {current_size_mb:.2f} MB（阈值 {TARGET_ORIGINAL_MB:.2f} MB）")
-                            if current_size_mb > TARGET_ORIGINAL_MB:
+                            retry = 0
+                            while current_size_mb is not None and current_size_mb > TARGET_ORIGINAL_MB and retry < MAX_COMPRESS_RETRY:
+                                retry += 1
+                                # 动态调整目标大小：按比例收缩并留 10% 裕量，避免边界震荡
+                                ratio = TARGET_ORIGINAL_MB / max(current_size_mb, 0.01)
+                                new_target = max(1.0, target_size_mb * ratio * 0.9)  # 不低于 1MB，避免过低异常
+
+                                print(f"压缩后仍为 {current_size_mb:.2f} MB，开始第 {retry} 次自适应压缩，目标 {new_target:.2f} MB")
                                 progress_queues[session_id].put({
                                     'type': 'compress',
-                                    'progress': 95,
-                                    'message': f'仍高于阈值({current_size_mb:.2f}MB>{TARGET_ORIGINAL_MB:.2f}MB)，将尝试上传，如失败请考虑截断时长或再次压缩'
+                                    'progress': 15,
+                                    'message': f'进一步压缩第{retry}次，目标 {new_target:.2f}MB'
                                 })
+
+                                # 以原始文件为输入，覆盖输出，避免多次转码累积失真
+                                target_size_mb = new_target
+                                success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
+                                if not success:
+                                    print("自适应压缩失败，保留上一版本压缩结果")
+                                    break
+
+                                try:
+                                    current_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
+                                except Exception:
+                                    current_size_mb = None
+
+                            if current_size_mb is not None:
+                                print(f"最终压缩文件大小: {current_size_mb:.2f} MB（阈值 {TARGET_ORIGINAL_MB:.2f} MB）")
+                                if current_size_mb > TARGET_ORIGINAL_MB:
+                                    progress_queues[session_id].put({
+                                        'type': 'compress',
+                                        'progress': 95,
+                                        'message': f'仍高于阈值({current_size_mb:.2f}MB>{TARGET_ORIGINAL_MB:.2f}MB)，将尝试上传，如失败请考虑截断时长或再次压缩'
+                                    })
+                        else:
+                            print("压缩失败，使用原视频")
+
+                    # ========== 新增：抽帧逻辑 ==========
+                    # 获取抽帧策略
+                    sampling_strategy = request.form.get('sampling_strategy', 'full_video')
+
+                    if sampling_strategy != 'full_video':
+                        # 需要抽帧处理
+                        print(f"\n使用抽帧策略: {sampling_strategy}")
+
+                        # 根据策略提取帧
+                        if sampling_strategy == 'uniform_fps':
+                            fps = float(request.form.get('uniform_fps', 1.0))
+                            frames, metadata = extract_frames_uniform(final_video_path, fps=fps, session_id=session_id)
+
+                        elif sampling_strategy == 'keyframe_only':
+                            num_frames = int(request.form.get('keyframe_count', 16))
+                            frames, metadata = extract_frames_keyframes(final_video_path, num_keyframes=num_frames, session_id=session_id)
+
+                        elif sampling_strategy == 'accident_analysis':
+                            config = {
+                                'detect_accident_time': request.form.get('detect_accident_time', 'true').lower() == 'true',
+                                'track_trajectory': request.form.get('track_trajectory', 'true').lower() == 'true',
+                                'analyze_environment': request.form.get('analyze_environment', 'true').lower() == 'true'
+                            }
+                            frames, metadata = extract_frames_accident_analysis(final_video_path, config, session_id=session_id)
+
+                        else:
+                            # 其他策略使用默认均匀采样
+                            frames, metadata = extract_frames_uniform(final_video_path, fps=1.0, session_id=session_id)
+
+                        # 将帧转换为base64图片列表
+                        base64_images = frames_to_base64_images(frames, max_size_mb=8)
+
+                        # 调用多图分析API
+                        result = analyze_images_with_api(base64_images, prompt=prompt, model=model, session_id=session_id)
+
+                        # 添加元数据到响应
+                        response_data = {
+                            'type': 'complete',
+                            'success': True,
+                            'result': result,
+                            'video_name': filename,
+                            'model': model,
+                            'input_method': 'upload',
+                            'sampling_strategy': sampling_strategy,
+                            'frames_extracted': len(frames),
+                            'metadata': metadata
+                        }
+
                     else:
-                        print("压缩失败，使用原视频")
+                        # 原有逻辑：完整视频分析
+                        result = analyze_video_with_api(video_path=final_video_path, prompt=prompt, model=model, session_id=session_id)
 
-                # 分析视频（带进度）
-                result = analyze_video_with_api(final_video_path, prompt, model, session_id=session_id)
+                        response_data = {
+                            'type': 'complete',
+                            'success': True,
+                            'result': result,
+                            'video_name': filename,
+                            'model': model,
+                            'input_method': 'upload'
+                        }
+                    # ========== 新增结束 ==========
 
-                response_data = {
-                    'type': 'complete',
-                    'success': True,
-                    'result': result,
-                    'video_name': filename,
-                    'model': model
-                }
+                    # 如果有压缩文件，返回下载链接
+                    if compressed_filename and os.path.exists(compressed_path):
+                        response_data['compressed_video'] = compressed_filename
+                        response_data['compressed_size'] = f"{os.path.getsize(compressed_path) / (1024*1024):.2f} MB"
+                        response_data['original_size'] = f"{file_size_mb:.2f} MB"
 
-                # 如果有压缩文件，返回下载链接
-                if compressed_filename and os.path.exists(compressed_path):
-                    response_data['compressed_video'] = compressed_filename
-                    response_data['compressed_size'] = f"{os.path.getsize(compressed_path) / (1024*1024):.2f} MB"
-                    response_data['original_size'] = f"{file_size_mb:.2f} MB"
-
-                # 推送完成消息
-                progress_queues[session_id].put(response_data)
+                    # 推送完成消息
+                    progress_queues[session_id].put(response_data)
 
             except Exception as e:
                 print(f"\n错误: {str(e)}\n")
