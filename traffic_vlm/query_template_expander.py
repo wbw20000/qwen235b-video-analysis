@@ -6,10 +6,28 @@ from .config import TemplateConfig
 
 
 VIOLATION_KEYWORDS = {
-    "bike_wrong_way": ["逆行", "wrong way", "逆向"],
-    "run_red_light": ["闯红灯", "run red", "红灯"],
-    "occupy_motor_lane": ["占用机动车道", "机动", "占道", "机动车道"],
-    "accident": ["事故", "碰撞", "摔倒", "accident", "collision"],
+    # 二轮车违法行为
+    "bike_wrong_way": ["逆行", "wrong way", "逆向", "二轮车逆行", "电动车逆行", "自行车逆行"],
+    "run_red_light_bike": ["二轮车闯红灯", "电动车闯红灯", "自行车闯红灯", "二轮车红灯"],
+    "occupy_motor_lane_bike": ["二轮车占用机动车道", "电动车占道", "自行车占道", "非机动车占道"],
+    "bike_improper_turning": ["二轮车违规转弯", "电动车违规变道", "自行车违规转向"],
+    "bike_illegal_u_turn": ["二轮车违规掉头", "电动车掉头", "自行车掉头"],
+
+    # 机动车违法行为
+    "car_wrong_way": ["机动车逆行", "汽车逆行", "车辆逆行", "小车逆行"],
+    "run_red_light_car": ["机动车闯红灯", "汽车闯红灯", "车辆闯红灯", "小车红灯"],
+    "illegal_parking": ["违法停车", "违停", "乱停车", "禁停区域停车"],
+    "illegal_u_turn": ["机动车违规掉头", "汽车掉头", "车辆掉头", "小车掉头"],
+    "speeding": ["超速", "车速过快", "超过限速"],
+    "illegal_overtaking": ["违规超车", "禁止超车", "不当超车"],
+    "improper_lane_change": ["违规变道", "不当变道", "突然变道", "未打转向灯变道"],
+
+    # 交通事故
+    "vehicle_to_vehicle_accident": ["两车相撞", "车车事故", "机动车碰撞", "汽车相撞", "车辆碰撞"],
+    "vehicle_to_bike_accident": ["车与二轮车事故", "车撞电动车", "车撞自行车", "机动车与二轮车碰撞", "汽车撞电动车"],
+    "vehicle_to_pedestrian_accident": ["车撞人", "机动车撞行人", "汽车撞人", "车辆撞人"],
+    "multi_vehicle_accident": ["多车连撞", "连环撞车", "三车相撞", "多车事故"],
+    "hit_and_run": ["肇事逃逸", "逃逸", "撞车后逃跑", "事故逃逸"],
 }
 
 
