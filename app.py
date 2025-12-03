@@ -31,6 +31,10 @@ import tempfile
 import shutil
 from datetime import datetime
 
+# TrafficVLM 模块
+from traffic_vlm.pipeline import TrafficVLMPipeline
+from traffic_vlm.config import TrafficVLMConfig
+
 # 可选：高级抽帧库
 try:
     import decord
@@ -77,7 +81,9 @@ AVAILABLE_MODELS = {
     'qwen-vl-plus': 'Qwen-VL-Plus（推荐，性价比高）',
     'qwen3-vl-plus': 'Qwen3-VL-Plus（最新版本）',
     'qwen3-vl-32b-instruct': 'Qwen3-VL-32B-Instruct（阿里云部署）',
-    'qwen3-vl-32b-thinking': 'Qwen3-VL-32B-Thinking（阿里云部署，思维链模式）'
+    'qwen3-vl-32b-thinking': 'Qwen3-VL-32B-Thinking（阿里云部署，思维链模式）',
+    'qwen3-vl-235b-a22b-instruct': 'Qwen3-VL-235B-A22B-Instruct（阿里云部署）',
+    'qwen3-vl-235b-a22b-thinking': 'Qwen3-VL-235B-A22B-Thinking（阿里云部署）'
 }
 
 def allowed_file(filename):
@@ -697,8 +703,9 @@ def extract_frames_accident_analysis(video_path, config, session_id=None):
 
         send_progress(90, '阶段3：提取环境分析帧...')
 
-        # 合并所有帧（去重）
-        all_frames = list(dict.fromkeys(frames_stage1 + frames_stage2 + frames_stage3))
+        # 合并所有帧（简单合并，不去重，因为PIL Image对象不可哈希）
+        # 由于frames_stage2和frames_stage3是从frames_stage1中选取的，重复影响不大
+        all_frames = frames_stage1 + frames_stage2 + frames_stage3
 
         metadata = {
             'strategy': 'accident_analysis',
@@ -721,13 +728,73 @@ def extract_frames_accident_analysis(video_path, config, session_id=None):
         raise
 
 
-def frames_to_base64_images(frames, max_size_mb=10):
+def save_frames_to_folder(frames, strategy_name, video_name=None):
     """
-    将帧列表转换为base64编码的图片列表（用于API调用）
+    保存抽取的帧到文件夹（用于调试）
 
     Args:
         frames: PIL Image列表
-        max_size_mb: 最大总大小（MB）
+        strategy_name: 抽帧策略名称
+        video_name: 视频文件名（可选）
+
+    Returns:
+        str: 保存的文件夹路径
+    """
+    from datetime import datetime
+
+    # 创建时间戳
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # 创建文件夹名称：策略名_时间戳
+    folder_name = f"{strategy_name}_{timestamp}"
+    if video_name:
+        # 移除文件扩展名
+        video_base = os.path.splitext(video_name)[0]
+        folder_name = f"{video_base}_{strategy_name}_{timestamp}"
+
+    # 创建保存路径
+    debug_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'debug_frames')
+    os.makedirs(debug_folder, exist_ok=True)
+
+    save_path = os.path.join(debug_folder, folder_name)
+    os.makedirs(save_path, exist_ok=True)
+
+    # 保存所有帧
+    print(f"\n💾 保存抽帧图片到: {save_path}")
+    for i, frame in enumerate(frames):
+        frame_path = os.path.join(save_path, f"frame_{i:04d}.jpg")
+        frame.save(frame_path, format='JPEG', quality=95)
+
+    print(f"✅ 已保存 {len(frames)} 帧到文件夹: {folder_name}\n")
+    return save_path
+
+
+def calculate_image_tokens(width, height):
+    """
+    计算图片的Token数量（Qwen3-VL规则：每32x32像素=1 Token）
+
+    Args:
+        width: 图片宽度
+        height: 图片高度
+
+    Returns:
+        int: Token数量
+    """
+    import math
+    # Qwen3-VL: 每32x32像素对应1个Token
+    tokens = math.ceil(width / 32) * math.ceil(height / 32)
+    # 最少4个Token，最多16384个Token
+    return max(4, min(tokens, 16384))
+
+
+def frames_to_base64_images(frames, max_tokens=250000):
+    """
+    将帧列表转换为base64编码的图片列表（用于API调用）
+    使用Token限制而非文件大小限制，确保符合Qwen-VL API要求
+
+    Args:
+        frames: PIL Image列表
+        max_tokens: 最大Token数（默认250000，为258048留余量）
 
     Returns:
         list: base64编码的图片URL列表
@@ -735,28 +802,56 @@ def frames_to_base64_images(frames, max_size_mb=10):
     import io
 
     base64_images = []
-    total_size = 0
+    total_tokens = 0
+    total_size_mb = 0
+
+    print(f"\n🔢 开始转换帧，使用Token限制策略（最大{max_tokens} tokens）")
 
     for i, frame in enumerate(frames):
+        # 压缩图片：降低分辨率以减少Token消耗
+        # 最大宽度1280px，这样可以在保持质量的同时减少Token
+        max_width = 1280
+        width, height = frame.size
+        if width > max_width:
+            ratio = max_width / width
+            new_size = (max_width, int(height * ratio))
+            frame = frame.resize(new_size, Image.Resampling.LANCZOS)
+            width, height = new_size
+
+        # 计算这张图片需要的Token数
+        frame_tokens = calculate_image_tokens(width, height)
+
+        # 检查Token限制
+        if total_tokens + frame_tokens > max_tokens:
+            print(f"⚠️ 已达到Token限制（{total_tokens}/{max_tokens}），停止添加更多帧")
+            print(f"   成功处理 {i}/{len(frames)} 帧")
+            break
+
         # 转换为JPEG并压缩
         buffer = io.BytesIO()
-        frame.save(buffer, format='JPEG', quality=85)
+        frame.save(buffer, format='JPEG', quality=70, optimize=True)
         img_bytes = buffer.getvalue()
 
         # 编码为base64
         img_base64 = base64.b64encode(img_bytes).decode('utf-8')
         img_url = f"data:image/jpeg;base64,{img_base64}"
 
-        # 检查大小
+        # 记录统计信息
         img_size_mb = len(img_base64) / (1024 * 1024)
-        if total_size + img_size_mb > max_size_mb:
-            print(f"警告：已达到{max_size_mb}MB限制，停止添加更多帧（已处理{i}帧）")
-            break
+        total_size_mb += img_size_mb
+        total_tokens += frame_tokens
 
         base64_images.append(img_url)
-        total_size += img_size_mb
 
-    print(f"转换完成：{len(base64_images)}帧，总大小{total_size:.2f}MB")
+        # 每10帧打印一次进度
+        if (i + 1) % 10 == 0:
+            print(f"   进度: {i+1}/{len(frames)} 帧，Token: {total_tokens}/{max_tokens}，大小: {total_size_mb:.2f}MB")
+
+    print(f"✅ 转换完成：{len(base64_images)}/{len(frames)} 帧")
+    print(f"   总Token数: {total_tokens} ({total_tokens/max_tokens*100:.1f}%)")
+    print(f"   总大小: {total_size_mb:.2f}MB")
+    print(f"   平均每帧: {total_tokens/len(base64_images):.0f} tokens, {total_size_mb/len(base64_images):.2f}MB\n")
+
     return base64_images
 
 
@@ -1064,6 +1159,9 @@ def analyze():
         # 获取用户提问和模型选择
         prompt = request.form.get('prompt', '请详细描述这个视频中发生了什么。')
         model = request.form.get('model', 'qwen-vl-plus')
+        analysis_mode = request.form.get('analysis_mode', 'traffic_vlm')
+        event_query = request.form.get('event_query', '').strip()
+        camera_id = request.form.get('camera_id', 'camera-1').strip() or 'camera-1'
 
         # 根据输入方式处理
         video_url = None
@@ -1113,6 +1211,21 @@ def analyze():
             if model not in extra_allowed:
                 model = 'qwen-vl-plus'
 
+        # ========== 提前获取所有请求参数（避免在线程中访问request） ==========
+        # 获取抽帧策略相关参数
+        sampling_strategy = request.form.get('sampling_strategy', 'full_video')
+        uniform_fps = float(request.form.get('uniform_fps', 1.0)) if sampling_strategy == 'uniform_fps' else 1.0
+        keyframe_count = int(request.form.get('keyframe_count', 16)) if sampling_strategy == 'keyframe_only' else 16
+
+        # 交通事故分析配置
+        accident_config = None
+        if sampling_strategy == 'accident_analysis':
+            accident_config = {
+                'detect_accident_time': request.form.get('detect_accident_time', 'true').lower() == 'true',
+                'track_trajectory': request.form.get('track_trajectory', 'true').lower() == 'true',
+                'analyze_environment': request.form.get('analyze_environment', 'true').lower() == 'true'
+            }
+
         # 生成唯一的会话ID
         session_id = f"{int(time.time() * 1000)}_{os.getpid()}"
 
@@ -1122,16 +1235,109 @@ def analyze():
         # 在后台线程中处理任务
         def process_video():
             compressed_path = None
+            final_video_path = filepath
             try:
-                if video_url:
-                    # URL方式 - 直接分析
+                user_intent = event_query or prompt
+                video_source_path = video_url if video_url else filepath
+
+                def pipeline_progress(percent, message):
+                    progress_queues[session_id].put({
+                        'type': 'analysis',
+                        'progress': int(percent),
+                        'message': message
+                    })
+
+                def format_pipeline_summary(res):
+                    lines = []
+                    lines.append(f"Keyframes: {len(res.get('keyframes', []))}")
+                    lines.append(f"Candidate clips: {len(res.get('clips', []))}")
+                    for item in res.get('results', []):
+                        clip = item.get('clip', {})
+                        vlm_out = item.get('vlm_output', {}) or {}
+                        vio = vlm_out.get('violations') or []
+                        vio_text = '; '.join([f"{v.get('type')}({v.get('confidence', 0):.2f})" for v in vio]) if vio else 'No high-confidence violations'
+                        lines.append(f"- {clip.get('clip_id', '')} [{clip.get('start_time', 0):.1f}-{clip.get('end_time', 0):.1f}s] score {clip.get('clip_score', 0):.3f} | {vio_text}")
+                    return "\n".join(lines)
+
+                def extract_detailed_analysis(res):
+                    """提取详细的分析结果（包含大模型的文本描述）"""
+                    results = res.get('results', [])
+                    if not results:
+                        return "未检测到相关内容"
+
+                    analysis_parts = []
+                    for i, item in enumerate(results, 1):
+                        vlm_out = item.get('vlm_output', {}) or {}
+                        text_summary = vlm_out.get('text_summary', '无描述')
+                        has_violation = vlm_out.get('has_violation', False)
+                        violations = vlm_out.get('violations', [])
+
+                        # 添加片段信息
+                        clip = item.get('clip', {})
+                        start_time = clip.get('start_time', 0)
+                        end_time = clip.get('end_time', 0)
+
+                        analysis_parts.append(f"【片段 {i}】时间: {start_time:.1f}s - {end_time:.1f}s")
+                        analysis_parts.append(f"分析结果: {text_summary}")
+
+                        # 添加违法信息
+                        if violations:
+                            analysis_parts.append("检测到的违法行为:")
+                            for v in violations:
+                                vtype = v.get('type', '')
+                                confidence = v.get('confidence', 0)
+                                evidence = v.get('evidence', '')
+                                analysis_parts.append(f"  - {vtype} (置信度: {confidence:.2f})")
+                                if evidence:
+                                    analysis_parts.append(f"    依据: {evidence}")
+                        elif has_violation:
+                            analysis_parts.append("检测到违法行为，但未能识别具体类型")
+                        else:
+                            analysis_parts.append("未检测到违法行为")
+
+                        analysis_parts.append("")  # 空行分隔
+
+                    return "\n".join(analysis_parts)
+
+                if analysis_mode == 'traffic_vlm':
                     print(f"\n{'='*60}")
-                    print(f"收到视频分析请求 (Session: {session_id})")
-                    print(f"视频URL: {video_url}")
-                    print(f"输入方式: URL (支持最大2GB)")
+                    print(f"TrafficVLM pipeline start (Session: {session_id})")
+                    print(f"Source: {video_source_path}")
+                    print(f"Camera ID: {camera_id}")
+                    print(f"Query: {user_intent}")
                     print(f"{'='*60}\n")
 
-                    # 直接分析URL
+                    try:
+                        pipeline = TrafficVLMPipeline(config=TrafficVLMConfig(), progress_cb=pipeline_progress)
+                        pipeline_result = pipeline.run(video_source_path, user_intent, camera_id=camera_id)
+
+                        # 返回详细的分析结果，而不是摘要
+                        detailed_analysis = extract_detailed_analysis(pipeline_result)
+
+                        response_data = {
+                            'type': 'complete',
+                            'success': True,
+                            'result': detailed_analysis,
+                            'analysis_mode': 'traffic_vlm',
+                            'video_source': video_source_path,
+                            'model': model,
+                            'pipeline': pipeline_result
+                        }
+                        progress_queues[session_id].put(response_data)
+                    except Exception as e:
+                        progress_queues[session_id].put({
+                            'type': 'error',
+                            'message': f'TrafficVLM pipeline failed: {str(e)}'
+                        })
+                    return
+
+                if video_url:
+                    print(f"\n{'='*60}")
+                    print(f"Received video analysis request (Session: {session_id})")
+                    print(f"Video URL: {video_url}")
+                    print(f"Input method: URL (max 10GB)")
+                    print(f"{'='*60}\n")
+
                     result = analyze_video_with_api(video_url=video_url, prompt=prompt, model=model, session_id=session_id)
 
                     response_data = {
@@ -1143,49 +1349,43 @@ def analyze():
                         'input_method': 'url'
                     }
 
-                    # 推送完成消息
                     progress_queues[session_id].put(response_data)
 
                 else:
-                    # 上传文件方式
                     file_size_mb = os.path.getsize(filepath) / (1024*1024)
 
                     print(f"\n{'='*60}")
-                    print(f"收到视频分析请求 (Session: {session_id})")
-                    print(f"视频文件: {filename}")
-                    print(f"保存路径: {filepath}")
-                    print(f"文件大小: {file_size_mb:.2f} MB")
-                    print(f"自动压缩: {auto_compress}")
+                    print(f"Received video analysis request (Session: {session_id})")
+                    print(f"Video file: {filename}")
+                    print(f"Path: {filepath}")
+                    print(f"Size: {file_size_mb:.2f} MB")
+                    print(f"Auto compress: {auto_compress}")
+                    print(f"Sampling: {sampling_strategy}")
                     print(f"{'='*60}\n")
 
-                    # 检查是否需要压缩
                     final_video_path = filepath
                     compressed_filename = None
 
-                    if auto_compress and file_size_mb > 7.0:
-                        print("视频文件较大，开始自动压缩...")
+                    if auto_compress and file_size_mb > 7.0 and sampling_strategy == 'full_video':
+                        print("Large file, start auto compression...")
 
-                        # 检查 FFmpeg
                         if not check_ffmpeg():
                             progress_queues[session_id].put({
                                 'type': 'error',
-                                'message': '未安装 FFmpeg！请先安装 FFmpeg 以使用视频压缩功能。'
+                                'message': 'FFmpeg not installed, cannot compress.'
                             })
                             return
 
-                        # 生成压缩后的文件名
                         name, ext = os.path.splitext(filename)
                         compressed_filename = f"{name}_compressed{ext}"
                         compressed_path = os.path.join(app.config['UPLOAD_FOLDER'], compressed_filename)
 
-                        # 压缩视频（带进度）
                         target_size_mb = 6.5
                         success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
 
                         if success:
-                            print(f"使用压缩后的视频: {compressed_filename}")
+                            print(f"Use compressed video: {compressed_filename}")
                             final_video_path = compressed_path
-                            # 自适应多轮压缩，直至满足上传阈值
                             try:
                                 current_size_mb = os.path.getsize(compressed_path) / (1024 * 1024)
                             except Exception:
@@ -1194,22 +1394,20 @@ def analyze():
                             retry = 0
                             while current_size_mb is not None and current_size_mb > TARGET_ORIGINAL_MB and retry < MAX_COMPRESS_RETRY:
                                 retry += 1
-                                # 动态调整目标大小：按比例收缩并留 10% 裕量，避免边界震荡
                                 ratio = TARGET_ORIGINAL_MB / max(current_size_mb, 0.01)
-                                new_target = max(1.0, target_size_mb * ratio * 0.9)  # 不低于 1MB，避免过低异常
+                                new_target = max(1.0, target_size_mb * ratio * 0.9)
 
-                                print(f"压缩后仍为 {current_size_mb:.2f} MB，开始第 {retry} 次自适应压缩，目标 {new_target:.2f} MB")
+                                print(f"Compressed still {current_size_mb:.2f} MB, retry {retry}, target {new_target:.2f} MB")
                                 progress_queues[session_id].put({
                                     'type': 'compress',
                                     'progress': 15,
-                                    'message': f'进一步压缩第{retry}次，目标 {new_target:.2f}MB'
+                                    'message': f'Re-compress #{retry}, target {new_target:.2f}MB'
                                 })
 
-                                # 以原始文件为输入，覆盖输出，避免多次转码累积失真
                                 target_size_mb = new_target
                                 success = compress_video(filepath, compressed_path, target_size_mb=target_size_mb, session_id=session_id)
                                 if not success:
-                                    print("自适应压缩失败，保留上一版本压缩结果")
+                                    print("Adaptive compression failed, keep last result")
                                     break
 
                                 try:
@@ -1217,53 +1415,35 @@ def analyze():
                                 except Exception:
                                     current_size_mb = None
 
-                            if current_size_mb is not None:
-                                print(f"最终压缩文件大小: {current_size_mb:.2f} MB（阈值 {TARGET_ORIGINAL_MB:.2f} MB）")
-                                if current_size_mb > TARGET_ORIGINAL_MB:
-                                    progress_queues[session_id].put({
-                                        'type': 'compress',
-                                        'progress': 95,
-                                        'message': f'仍高于阈值({current_size_mb:.2f}MB>{TARGET_ORIGINAL_MB:.2f}MB)，将尝试上传，如失败请考虑截断时长或再次压缩'
-                                    })
+                            if current_size_mb is not None and current_size_mb > TARGET_ORIGINAL_MB:
+                                progress_queues[session_id].put({
+                                    'type': 'compress',
+                                    'progress': 95,
+                                    'message': f'Still above threshold ({current_size_mb:.2f}MB>{TARGET_ORIGINAL_MB:.2f}MB), may fail upload'
+                                })
                         else:
-                            print("压缩失败，使用原视频")
-
-                    # ========== 新增：抽帧逻辑 ==========
-                    # 获取抽帧策略
-                    sampling_strategy = request.form.get('sampling_strategy', 'full_video')
+                            print("Compression failed, use original video")
 
                     if sampling_strategy != 'full_video':
-                        # 需要抽帧处理
-                        print(f"\n使用抽帧策略: {sampling_strategy}")
+                        print(f"\nSampling strategy: {sampling_strategy}")
 
-                        # 根据策略提取帧
                         if sampling_strategy == 'uniform_fps':
-                            fps = float(request.form.get('uniform_fps', 1.0))
-                            frames, metadata = extract_frames_uniform(final_video_path, fps=fps, session_id=session_id)
-
+                            frames, metadata = extract_frames_uniform(final_video_path, fps=uniform_fps, session_id=session_id)
                         elif sampling_strategy == 'keyframe_only':
-                            num_frames = int(request.form.get('keyframe_count', 16))
-                            frames, metadata = extract_frames_keyframes(final_video_path, num_keyframes=num_frames, session_id=session_id)
-
+                            frames, metadata = extract_frames_keyframes(final_video_path, num_keyframes=keyframe_count, session_id=session_id)
                         elif sampling_strategy == 'accident_analysis':
-                            config = {
-                                'detect_accident_time': request.form.get('detect_accident_time', 'true').lower() == 'true',
-                                'track_trajectory': request.form.get('track_trajectory', 'true').lower() == 'true',
-                                'analyze_environment': request.form.get('analyze_environment', 'true').lower() == 'true'
-                            }
-                            frames, metadata = extract_frames_accident_analysis(final_video_path, config, session_id=session_id)
-
+                            frames, metadata = extract_frames_accident_analysis(final_video_path, accident_config, session_id=session_id)
                         else:
-                            # 其他策略使用默认均匀采样
                             frames, metadata = extract_frames_uniform(final_video_path, fps=1.0, session_id=session_id)
 
-                        # 将帧转换为base64图片列表
-                        base64_images = frames_to_base64_images(frames, max_size_mb=8)
+                        try:
+                            save_frames_to_folder(frames, sampling_strategy, filename)
+                        except Exception as e:
+                            print(f"Save frames failed: {str(e)}")
 
-                        # 调用多图分析API
+                        base64_images = frames_to_base64_images(frames, max_tokens=250000)
                         result = analyze_images_with_api(base64_images, prompt=prompt, model=model, session_id=session_id)
 
-                        # 添加元数据到响应
                         response_data = {
                             'type': 'complete',
                             'success': True,
@@ -1277,7 +1457,6 @@ def analyze():
                         }
 
                     else:
-                        # 原有逻辑：完整视频分析
                         result = analyze_video_with_api(video_path=final_video_path, prompt=prompt, model=model, session_id=session_id)
 
                         response_data = {
@@ -1288,27 +1467,22 @@ def analyze():
                             'model': model,
                             'input_method': 'upload'
                         }
-                    # ========== 新增结束 ==========
 
-                    # 如果有压缩文件，返回下载链接
                     if compressed_filename and os.path.exists(compressed_path):
                         response_data['compressed_video'] = compressed_filename
                         response_data['compressed_size'] = f"{os.path.getsize(compressed_path) / (1024*1024):.2f} MB"
                         response_data['original_size'] = f"{file_size_mb:.2f} MB"
 
-                    # 推送完成消息
                     progress_queues[session_id].put(response_data)
 
             except Exception as e:
-                print(f"\n错误: {str(e)}\n")
-                # 清理压缩文件
+                print(f"\nError: {str(e)}\n")
                 if compressed_path and os.path.exists(compressed_path):
                     try:
                         os.remove(compressed_path)
                     except:
                         pass
 
-                # 推送错误消息
                 progress_queues[session_id].put({
                     'type': 'error',
                     'message': str(e)

@@ -56,3 +56,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# TrafficVLM
+data/
+*.db
+yolov8n.pt
+API-KEY.txt

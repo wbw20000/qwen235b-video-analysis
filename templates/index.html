@@ -356,7 +356,8 @@
                     <option value="qwen-vl-max">Qwen-VL-Max（最强视觉理解能力）</option>
                     <option value="qwen3-vl-32b-instruct">Qwen3-VL-32B-Instruct（阿里云部署）</option>
                     <option value="qwen3-vl-32b-thinking">Qwen3-VL-32B-Thinking（阿里云部署，思维链模式）</option>
-                    <option value="qwen3-vl-235b-a22b-thinking">通义千问3-VL-235B-A22B-Thinking</option>
+                    <option value="qwen3-vl-235b-a22b-instruct">Qwen3-VL-235B-A22B-Instruct（阿里云部署）</option>
+                    <option value="qwen3-vl-235b-a22b-thinking">Qwen3-VL-235B-A22B-Thinking（阿里云部署）</option>
                     <option value="qwen-vlmax-20250813">通义千问 VLMax20250813</option>
                 </select>
                 <small style="color: #666; margin-top: 8px; display: block;">不同模型的性能和价格不同，推荐使用 Qwen-VL-Plus</small>
@@ -454,16 +455,37 @@
             </div>
             <!-- ==================== 新增结束 ==================== -->
 
+            <!-- 违法检索事件 -->
+            <div class="input-group">
+                <label for="eventQuery">违法检索事件</label>
+                <input id="eventQuery" name="event_query" type="text" placeholder="例如：二轮车逆行 / 闯红灯 / 占用机动车道 / 交通事故" value="二轮车逆行">
+                <small style="color: #666; display: block; margin-top: 5px;">多个事件用顿号或逗号分隔，默认使用 TrafficVLM 管线。</small>
+            </div>
+
+            <!-- 分析模式与 Camera ID -->
+            <div class="input-group">
+                <label for="analysisMode">分析模式</label>
+                <select id="analysisMode" name="analysis_mode">
+                    <option value="traffic_vlm" selected>TrafficVLM（违法检索）</option>
+                    <option value="legacy">传统模式（原生上传/抽帧）</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label for="cameraId">Camera ID</label>
+                <input id="cameraId" name="camera_id" type="text" value="camera-1" placeholder="camera-1">
+            </div>
+
             <!-- 提问区域 -->
             <div class="input-group">
                 <label for="prompt">您的问题:</label>
                 <textarea id="prompt" name="prompt" placeholder="例如: 请详细描述这个视频中发生了什么，包括场景、人物动作和关键事件。">请详细描述这个视频中发生了什么。</textarea>
             </div>
 
-            <!-- 自动压缩选项 (仅上传方式显示) -->
-            <div class="input-group" id="compressOption">
+            <!-- 自动压缩选项 (已禁用 - 改用抽帧策略) -->
+            <div class="input-group" id="compressOption" style="display: none;">
                 <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="autoCompress" name="auto_compress" checked style="width: auto; margin-right: 10px;">
+                    <input type="checkbox" id="autoCompress" name="auto_compress" style="width: auto; margin-right: 10px;">
                     <span>自动压缩大视频（>7MB 自动压缩到 6.5MB）</span>
                 </label>
                 <small style="color: #666; margin-top: 8px; display: block;">
@@ -515,6 +537,17 @@
                     <div class="progress-bar" id="uploadBar" style="width: 0%;">0%</div>
                 </div>
                 <div class="progress-message" id="uploadMessage">等待开始...</div>
+            </div>
+            <!-- TrafficVLM 管线进度 -->
+            <div class="progress-item" id="analysisProgressItem" style="display: none;">
+                <div class="progress-label">
+                    <span>🚦 TrafficVLM</span>
+                    <span class="progress-percent" id="analysisPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="analysisBar" style="width: 0%;">0%</div>
+                </div>
+                <div class="progress-message" id="analysisMessage">等待开始...</div>
             </div>
         </div>
 
@@ -728,6 +761,10 @@
         const uploadBar = document.getElementById('uploadBar');
         const uploadPercent = document.getElementById('uploadPercent');
         const uploadMessage = document.getElementById('uploadMessage');
+        const analysisProgressItem = document.getElementById('analysisProgressItem');
+        const analysisBar = document.getElementById('analysisBar');
+        const analysisPercent = document.getElementById('analysisPercent');
+        const analysisMessage = document.getElementById('analysisMessage');
 
         let currentEventSource = null;
 
@@ -738,7 +775,15 @@
                 compressBar.style.width = progress + '%';
                 compressBar.textContent = progress + '%';
                 compressPercent.textContent = progress + '%';
-                compressMessage.textContent = message || '';
+
+                // 增强GPU/CPU状态显示
+                if (message && message.includes('GPU')) {
+                    compressMessage.innerHTML = '<span style="color: #4CAF50; font-weight: bold;">⚡ GPU加速:</span> ' + message;
+                } else if (message && message.includes('CPU')) {
+                    compressMessage.innerHTML = '<span style="color: #FF9800; font-weight: bold;">🐢 CPU编码:</span> ' + message;
+                } else {
+                    compressMessage.textContent = message || '';
+                }
             } else if (type === 'sampling') {
                 samplingProgressItem.style.display = 'block';
                 samplingBar.style.width = progress + '%';
@@ -751,6 +796,12 @@
                 uploadBar.textContent = progress + '%';
                 uploadPercent.textContent = progress + '%';
                 uploadMessage.textContent = message || '';
+            } else if (type === 'analysis') {
+                analysisProgressItem.style.display = 'block';
+                analysisBar.style.width = progress + '%';
+                analysisBar.textContent = progress + '%';
+                analysisPercent.textContent = progress + '%';
+                analysisMessage.textContent = message || '';
             }
         }
 
@@ -760,18 +811,21 @@
             compressProgressItem.style.display = 'none';
             samplingProgressItem.style.display = 'none';
             uploadProgressItem.style.display = 'none';
+            analysisProgressItem.style.display = 'none';
             compressBar.style.width = '0%';
             samplingBar.style.width = '0%';
             uploadBar.style.width = '0%';
+            analysisBar.style.width = '0%';
             compressPercent.textContent = '0%';
             samplingPercent.textContent = '0%';
             uploadPercent.textContent = '0%';
+            analysisPercent.textContent = '0%';
             compressMessage.textContent = '等待开始...';
             samplingMessage.textContent = '等待开始...';
             uploadMessage.textContent = '等待开始...';
+            analysisMessage.textContent = '等待开始...';
         }
 
-        // 表单提交
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -808,6 +862,9 @@
             formData.append('input_method', inputMethod);
             formData.append('prompt', document.getElementById('prompt').value);
             formData.append('model', document.getElementById('model').value);
+            formData.append('event_query', document.getElementById('eventQuery').value);
+            formData.append('analysis_mode', document.getElementById('analysisMode').value);
+            formData.append('camera_id', document.getElementById('cameraId').value);
 
             // ==================== 新增：抽帧策略参数 ====================
             formData.append('sampling_strategy', document.getElementById('samplingStrategy').value);
@@ -873,7 +930,9 @@
 
                 currentEventSource.onmessage = function(event) {
                     try {
+                        console.log('[DEBUG] 原始SSE数据:', event.data);
                         const progressData = JSON.parse(event.data);
+                        console.log('[DEBUG] 解析后的数据:', progressData);
 
                         if (progressData.type === 'compress') {
                             // 压缩进度更新
@@ -881,42 +940,73 @@
                         } else if (progressData.type === 'upload') {
                             // 上传分析进度更新
                             updateProgress('upload', progressData.progress, progressData.message);
+                        } else if (progressData.type === 'analysis') {
+                            // TrafficVLM 管线进度
+                            updateProgress('analysis', progressData.progress, progressData.message);
                         } else if (progressData.type === 'complete') {
                             // 任务完成
-                            currentEventSource.close();
-                            submitBtn.disabled = false;
+                            console.log('[DEBUG] 收到complete事件:', progressData);
 
-                            // 恢复保存的URL（防止被意外清空）
-                            if (savedVideoUrl && !videoUrlInput.value.trim()) {
-                                videoUrlInput.value = savedVideoUrl;
+                            try {
+                                currentEventSource.close();
+                                submitBtn.disabled = false;
+                                console.log('[DEBUG] 按钮已启用');
+
+                                // 恢复保存的URL（防止被意外清空）
+                                if (savedVideoUrl && !videoUrlInput.value.trim()) {
+                                    videoUrlInput.value = savedVideoUrl;
+                                    console.log('[DEBUG] URL已恢复');
+                                }
+
+                                // 显示结果 - 添加详细调试
+                                console.log('[DEBUG] 开始显示结果');
+                                console.log('[DEBUG] resultContent元素:', resultContent);
+                                console.log('[DEBUG] resultArea元素:', resultArea);
+                                console.log('[DEBUG] progressData.result:', progressData.result);
+
+                                if (progressData.result) {
+                                    resultContent.textContent = progressData.result;
+                                    console.log('[DEBUG] 结果已设置到resultContent');
+                                } else {
+                                    console.error('[ERROR] progressData.result为空!');
+                                    resultContent.textContent = '[错误] 未获取到分析结果';
+                                }
+
+                                resultArea.classList.add('show');
+                                console.log('[DEBUG] resultArea已显示');
+
+                                // 如果有压缩视频，显示下载链接
+                                const compressedInfo = document.getElementById('compressedInfo');
+                                if (progressData.compressed_video) {
+                                    const sizeInfo = document.getElementById('sizeInfo');
+                                    sizeInfo.textContent = `原始大小: ${progressData.original_size}, 压缩后: ${progressData.compressed_size}`;
+
+                                    const downloadBtn = document.getElementById('downloadBtn');
+                                    downloadBtn.href = `/download/${progressData.compressed_video}`;
+                                    downloadBtn.download = progressData.compressed_video;
+
+                                    compressedInfo.style.display = 'block';
+                                    console.log('[DEBUG] 压缩视频信息已显示');
+                                } else {
+                                    compressedInfo.style.display = 'none';
+                                }
+
+                                // 隐藏进度条
+                                setTimeout(() => {
+                                    progressContainer.classList.remove('show');
+                                    console.log('[DEBUG] 进度条已隐藏');
+                                }, 2000);
+
+                                console.log('[DEBUG] complete事件处理完成');
+
+                            } catch (displayErr) {
+                                console.error('[ERROR] 显示结果时出错:', displayErr);
+                                showError('显示结果时出错: ' + displayErr.message);
                             }
-
-                            // 显示结果
-                            resultContent.textContent = progressData.result;
-                            resultArea.classList.add('show');
-
-                            // 如果有压缩视频，显示下载链接
-                            const compressedInfo = document.getElementById('compressedInfo');
-                            if (progressData.compressed_video) {
-                                const sizeInfo = document.getElementById('sizeInfo');
-                                sizeInfo.textContent = `原始大小: ${progressData.original_size}, 压缩后: ${progressData.compressed_size}`;
-
-                                const downloadBtn = document.getElementById('downloadBtn');
-                                downloadBtn.href = `/download/${progressData.compressed_video}`;
-                                downloadBtn.download = progressData.compressed_video;
-
-                                compressedInfo.style.display = 'block';
-                            } else {
-                                compressedInfo.style.display = 'none';
-                            }
-
-                            // 隐藏进度条
-                            setTimeout(() => {
-                                progressContainer.classList.remove('show');
-                            }, 2000);
 
                         } else if (progressData.type === 'error') {
                             // 错误
+                            console.log('[DEBUG] 收到error事件:', progressData);
                             currentEventSource.close();
                             submitBtn.disabled = false;
 
