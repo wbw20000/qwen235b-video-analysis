@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import numpy as np
 from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
@@ -180,14 +181,78 @@ class TrafficVLMPipeline:
         }
 
     @staticmethod
+    def _merge_close_tracks(tracks: Dict, distance_threshold: float = 80.0) -> Dict:
+        """
+        合并距离相近、时间连续的轨迹，避免同一个目标被分配多个ID
+        """
+        if not tracks:
+            return {}
+
+        track_list = list(tracks.items())
+        merged = {}
+        used = set()
+
+        for tid1, info1 in track_list:
+            if tid1 in used:
+                continue
+
+            traj1 = info1.get("trajectory", [])
+            if not traj1:
+                continue
+
+            # 计算轨迹中心点
+            points1 = [(x, y) for _, x, y, _, _ in traj1]
+            center1 = np.mean(points1, axis=0)
+
+            # 寻找相近轨迹
+            cluster_ids = [tid1]
+            for tid2, info2 in track_list:
+                if tid2 in used or tid2 == tid1:
+                    continue
+
+                traj2 = info2.get("trajectory", [])
+                if not traj2:
+                    continue
+
+                points2 = [(x, y) for _, x, y, _, _ in traj2]
+                center2 = np.mean(points2, axis=0)
+                distance = np.linalg.norm(center1 - center2)
+
+                if distance < distance_threshold:
+                    cluster_ids.append(tid2)
+
+            # 合并轨迹（保留第一个ID）
+            merged_track = {
+                "category": info1.get("category"),
+                "trajectory": [],
+                "merged_ids": cluster_ids
+            }
+            for tid in cluster_ids:
+                merged_track["trajectory"].extend(tracks[tid]["trajectory"])
+                used.add(tid)
+
+            merged[tid1] = merged_track
+            used.add(tid1)
+
+        return merged
+
+    @staticmethod
     def _tracks_to_text(tracks: Dict) -> str:
+        if not tracks:
+            return ""
+
+        # 轨迹去重与合并
+        merged_tracks = TrafficVLMPipeline._merge_close_tracks(tracks)
+
         parts = []
-        for tid, info in tracks.items():
+        for tid, info in merged_tracks.items():
             traj = info.get("trajectory", [])
+            merged_ids = info.get("merged_ids", [tid])
             if traj:
                 start = traj[0]
                 end = traj[-1]
-                parts.append(f"ID={tid}: cls={info.get('category')}, 从({start[1]:.1f},{start[2]:.1f})到({end[1]:.1f},{end[2]:.1f})")
+                parts.append(f"ID={tid} (含{len(merged_ids)}个轨迹): 从({start[1]:.1f},{start[2]:.1f})到({end[1]:.1f},{end[2]:.1f})")
+
         return "\n".join(parts)
 
     @staticmethod
