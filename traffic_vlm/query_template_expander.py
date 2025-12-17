@@ -31,6 +31,29 @@ VIOLATION_KEYWORDS = {
 }
 
 
+# 事故检索模式专用关键词（更宽松的匹配）
+ACCIDENT_KEYWORDS = {
+    "vehicle_to_vehicle_accident": [
+        "事故", "交通事故", "车祸", "碰撞", "撞车", "相撞", "追尾",
+        "两车相撞", "车车事故", "机动车碰撞", "汽车相撞", "车辆碰撞",
+        "accident", "collision", "crash",
+    ],
+    "vehicle_to_bike_accident": [
+        "撞电动车", "撞自行车", "撞摩托车", "车撞电动车", "车撞自行车",
+        "机动车与二轮车碰撞", "汽车撞电动车", "车与二轮车事故",
+    ],
+    "vehicle_to_pedestrian_accident": [
+        "撞人", "撞行人", "车撞人", "机动车撞行人", "汽车撞人", "车辆撞人",
+    ],
+    "multi_vehicle_accident": [
+        "多车", "连环", "三车", "多车连撞", "连环撞车", "多车事故",
+    ],
+    "hit_and_run": [
+        "逃逸", "肇事逃逸", "撞车后逃跑", "事故逃逸",
+    ],
+}
+
+
 def infer_violation_types(user_query: str) -> List[str]:
     """根据用户查询粗略推断违规类型列表。"""
     matched = []
@@ -39,6 +62,23 @@ def infer_violation_types(user_query: str) -> List[str]:
             matched.append(v_type)
     if not matched:
         matched.append("bike_wrong_way")
+    return matched
+
+
+def infer_accident_types(user_query: str) -> List[str]:
+    """
+    事故检索模式：更积极地匹配所有事故类型。
+    如果没有匹配或输入包含通用"事故"关键词，返回所有事故类型。
+    """
+    matched = []
+    for v_type, keywords in ACCIDENT_KEYWORDS.items():
+        if any(k.lower() in user_query.lower() for k in keywords):
+            matched.append(v_type)
+
+    # 如果没有匹配或输入包含通用"事故"词，返回所有事故类型
+    generic_accident_terms = ["事故", "交通事故", "accident", "碰撞", "撞车"]
+    if not matched or any(term in user_query.lower() for term in generic_accident_terms):
+        return list(ACCIDENT_KEYWORDS.keys())
     return matched
 
 
@@ -58,3 +98,21 @@ def expand_templates(user_query: str, template_config: TemplateConfig) -> Tuple[
     # 去重
     templates = list(dict.fromkeys(templates))
     return templates, violation_types
+
+
+def expand_accident_templates(user_query: str, template_config: TemplateConfig) -> Tuple[List[str], List[str]]:
+    """
+    事故检索模式：扩展事故相关模板。
+    返回 (templates, accident_types)
+    """
+    accident_types = infer_accident_types(user_query)
+    templates: List[str] = []
+
+    for v_type in accident_types:
+        templates.extend(template_config.builtin_templates.get(v_type, []))
+
+    # 用户原始 query 也加入模板
+    templates.append(user_query)
+    # 去重
+    templates = list(dict.fromkeys(templates))
+    return templates, accident_types

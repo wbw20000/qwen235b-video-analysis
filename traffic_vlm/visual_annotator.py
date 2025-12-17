@@ -20,14 +20,21 @@ def annotate_frames(
     camera_id: str,
     date_str: str,
     roi_polygon: Optional[List[Tuple[int, int]]] = None,
+    clip_id: Optional[str] = None,
 ) -> List[Dict]:
     """
     在帧上绘制 bbox/track_id/ROI，保存文件。
     frames: [(timestamp, frame)]
     frame_results: [{"timestamp": ts, "detections": [...] }]
+    clip_id: 可选的clip标识符，用于区分不同clip的标注帧，避免文件名冲突
     """
     os.makedirs(save_dir, exist_ok=True)
     annotated: List[Dict] = []
+
+    # 诊断日志：检查长度一致性
+    print(f"[VisualAnnotator] frames 长度: {len(frames)}, frame_results 长度: {len(frame_results)}")
+    if len(frames) != len(frame_results):
+        print(f"[VisualAnnotator] ⚠️ 长度不一致！后续帧可能没有检测框")
 
     for (ts, frame), res in zip(frames, frame_results):
         canvas = frame.copy()
@@ -40,8 +47,12 @@ def annotate_frames(
             label = f"ID {track_id} {score:.2f}"
             cv2.putText(canvas, label, (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-        fname = f"{camera_id}_{date_str}_{ts:07.3f}_annotated.jpg"
+        # 文件名加入clip_id以区分不同clip的标注帧
+        if clip_id:
+            fname = f"{camera_id}_{date_str}_{clip_id}_{ts:07.3f}_annotated.jpg"
+        else:
+            fname = f"{camera_id}_{date_str}_{ts:07.3f}_annotated.jpg"
         path = os.path.join(save_dir, fname)
         cv2.imwrite(path, canvas)
-        annotated.append({"timestamp": ts, "path": path})
+        annotated.append({"timestamp": ts, "path": path, "clip_id": clip_id})
     return annotated

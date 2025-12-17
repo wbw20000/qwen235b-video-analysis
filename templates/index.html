@@ -100,6 +100,29 @@
             transform: none;
         }
 
+        .btn-danger {
+            background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
+            color: white;
+            margin-left: 10px;
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(229, 57, 53, 0.4);
+        }
+
+        .btn-danger:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
         .input-group {
             margin-bottom: 20px;
         }
@@ -467,6 +490,7 @@
                 <label for="analysisMode">分析模式</label>
                 <select id="analysisMode" name="analysis_mode">
                     <option value="traffic_vlm" selected>TrafficVLM（违法检索）</option>
+                    <option value="accident_search">交通事故检索</option>
                     <option value="legacy">传统模式（原生上传/抽帧）</option>
                 </select>
             </div>
@@ -494,9 +518,14 @@
             </div>
 
             <!-- 提交按钮 -->
-            <button type="submit" class="btn btn-primary" id="submitBtn">
-                🚀 开始分析
-            </button>
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary" id="submitBtn">
+                    🚀 开始分析
+                </button>
+                <button type="button" class="btn btn-danger" id="stopBtn" disabled>
+                    ⏹️ 停止分析
+                </button>
+            </div>
         </form>
 
         <!-- 进度条 -->
@@ -612,10 +641,15 @@
         const fileName = document.getElementById('fileName');
         const uploadForm = document.getElementById('uploadForm');
         const submitBtn = document.getElementById('submitBtn');
+        const stopBtn = document.getElementById('stopBtn');
         const loading = document.getElementById('loading');
         const error = document.getElementById('error');
         const resultArea = document.getElementById('resultArea');
         const resultContent = document.getElementById('resultContent');
+
+        // 当前会话ID（用于停止分析）
+        let currentSessionId = null;
+        let isAnalyzing = false;
 
         // 抽帧策略相关元素
         const samplingStrategy = document.getElementById('samplingStrategy');
@@ -826,6 +860,59 @@
             analysisMessage.textContent = '等待开始...';
         }
 
+        // 停止分析
+        async function stopAnalysis() {
+            if (!currentSessionId || !isAnalyzing) {
+                return;
+            }
+
+            console.log('[DEBUG] 停止分析, session_id:', currentSessionId);
+
+            try {
+                // 调用后端停止API
+                const response = await fetch(`/stop/${currentSessionId}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                console.log('[DEBUG] 停止响应:', data);
+
+                // 关闭SSE连接
+                if (currentEventSource) {
+                    currentEventSource.close();
+                    currentEventSource = null;
+                }
+
+                // 重置UI状态
+                isAnalyzing = false;
+                currentSessionId = null;
+                submitBtn.disabled = false;
+                stopBtn.disabled = true;
+
+                // 显示停止提示
+                error.textContent = '⏹️ 分析已停止';
+                error.classList.add('show');
+                error.style.background = '#fff3e0';
+                error.style.color = '#f57c00';
+
+                // 隐藏进度条
+                progressContainer.classList.remove('show');
+                resetProgress();
+
+                // 恢复保存的URL
+                if (savedVideoUrl && !videoUrlInput.value.trim()) {
+                    videoUrlInput.value = savedVideoUrl;
+                }
+
+            } catch (err) {
+                console.error('[ERROR] 停止分析失败:', err);
+                showError('停止分析失败: ' + err.message);
+            }
+        }
+
+        // 停止按钮点击事件
+        stopBtn.addEventListener('click', stopAnalysis);
+
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -897,7 +984,11 @@
 
             // 重置状态
             submitBtn.disabled = true;
+            stopBtn.disabled = false;  // 启用停止按钮
+            isAnalyzing = true;
             error.classList.remove('show');
+            error.style.background = '';  // 重置错误框样式
+            error.style.color = '';
             resultArea.classList.remove('show');
             resetProgress();
             progressContainer.classList.add('show');
@@ -919,11 +1010,14 @@
                 if (!response.ok || !data.success) {
                     showError(data.error || '提交失败，请重试');
                     submitBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    isAnalyzing = false;
                     progressContainer.classList.remove('show');
                     return;
                 }
 
                 const sessionId = data.session_id;
+                currentSessionId = sessionId;  // 保存session_id用于停止分析
 
                 // 第二步：建立 SSE 连接接收进度
                 currentEventSource = new EventSource(`/progress/${sessionId}`);
@@ -950,6 +1044,9 @@
                             try {
                                 currentEventSource.close();
                                 submitBtn.disabled = false;
+                                stopBtn.disabled = true;
+                                isAnalyzing = false;
+                                currentSessionId = null;
                                 console.log('[DEBUG] 按钮已启用');
 
                                 // 恢复保存的URL（防止被意外清空）
@@ -1009,6 +1106,9 @@
                             console.log('[DEBUG] 收到error事件:', progressData);
                             currentEventSource.close();
                             submitBtn.disabled = false;
+                            stopBtn.disabled = true;
+                            isAnalyzing = false;
+                            currentSessionId = null;
 
                             // 恢复保存的URL（防止被意外清空）
                             if (savedVideoUrl && !videoUrlInput.value.trim()) {
@@ -1016,6 +1116,26 @@
                             }
 
                             showError(progressData.message);
+                            progressContainer.classList.remove('show');
+                        } else if (progressData.type === 'stopped') {
+                            // 分析被停止
+                            console.log('[DEBUG] 收到stopped事件:', progressData);
+                            currentEventSource.close();
+                            submitBtn.disabled = false;
+                            stopBtn.disabled = true;
+                            isAnalyzing = false;
+                            currentSessionId = null;
+
+                            // 恢复保存的URL
+                            if (savedVideoUrl && !videoUrlInput.value.trim()) {
+                                videoUrlInput.value = savedVideoUrl;
+                            }
+
+                            // 显示停止提示
+                            error.textContent = '⏹️ 分析已停止';
+                            error.classList.add('show');
+                            error.style.background = '#fff3e0';
+                            error.style.color = '#f57c00';
                             progressContainer.classList.remove('show');
                         }
                     } catch (err) {
@@ -1027,6 +1147,9 @@
                     console.error('SSE 连接错误:', err);
                     currentEventSource.close();
                     submitBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    isAnalyzing = false;
+                    currentSessionId = null;
 
                     // 恢复保存的URL（防止被意外清空）
                     if (savedVideoUrl && !videoUrlInput.value.trim()) {
@@ -1045,6 +1168,9 @@
 
                 showError('网络错误: ' + err.message);
                 submitBtn.disabled = false;
+                stopBtn.disabled = true;
+                isAnalyzing = false;
+                currentSessionId = null;
                 progressContainer.classList.remove('show');
             }
         });

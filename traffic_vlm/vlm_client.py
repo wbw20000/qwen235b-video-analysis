@@ -3,11 +3,53 @@ from __future__ import annotations
 import base64
 import json
 import os
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from openai import OpenAI
 
 from .config import VLMConfig
+
+
+def _save_vlm_request_log(
+    mode: str,
+    model: str,
+    temperature: float,
+    system_prompt: str,
+    user_prompt: str,
+    image_paths: List[str],
+    response_text: str,
+    parsed_response: Dict,
+    clip_info: Optional[Dict] = None,
+    base_dir: str = "data",
+) -> str:
+    """保存VLM请求和响应数据到文件"""
+    log_dir = os.path.join(base_dir, "vlm_logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    log_file = os.path.join(log_dir, f"vlm_request_{mode}_{timestamp}.json")
+
+    log_data = {
+        "timestamp": datetime.now().isoformat(),
+        "mode": mode,
+        "model": model,
+        "temperature": temperature,
+        # Clip信息（来自pipeline的候选片段）
+        "clip_info": clip_info or {},
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "image_paths": image_paths,
+        "image_count": len(image_paths),
+        "response_raw": response_text,
+        "response_parsed": parsed_response,
+    }
+
+    with open(log_file, "w", encoding="utf-8") as f:
+        json.dump(log_data, f, ensure_ascii=False, indent=2)
+
+    print(f"[VLM日志] 已保存到: {log_file}")
+    return log_file
 
 
 SYSTEM_PROMPT = """
@@ -63,6 +105,77 @@ SYSTEM_PROMPT = """
     }
   ],
   "text_summary": "对整个片段的详细自然语言描述，包含事件全过程的完整信息"
+}
+"""
+
+# 交通事故检索模式专用 System Prompt
+ACCIDENT_SYSTEM_PROMPT = """
+你是专业的交通事故分析专家，专门负责识别和分析道路交通事故。
+
+你会收到：
+1. 路口监控关键帧图片（已标注车道区域、目标ID和轨迹）
+2. 详细的路口配置和目标轨迹信息
+
+你的任务是**主动寻找**以下交通事故迹象：
+
+【交通事故类型】
+- vehicle_to_vehicle_accident: 机动车之间碰撞（追尾、侧碰、正面碰撞）
+- vehicle_to_bike_accident: 机动车与二轮车碰撞（电动车、自行车、摩托车）
+- vehicle_to_pedestrian_accident: 机动车与行人碰撞
+- multi_vehicle_accident: 多车连撞/连环追尾
+- hit_and_run: 肇事逃逸
+
+【事故识别关键视觉特征】⭐
+1. **碰撞接触**：两个或多个目标发生物理接触、重叠、位置突然靠近
+2. **速度突变**：目标突然减速、急停、方向突变
+3. **姿态异常**：车辆倾斜、侧翻、骑车人/行人摔倒
+4. **形变损坏**：车辆外观变形、零件脱落
+5. **散落物**：碎片、零件、物品散落在路面
+6. **停滞状态**：碰撞后车辆/人员停止运动，在非正常位置停留
+7. **人员倒地**：行人或骑车人躺在地面上
+
+【事故后场景特征】⭐⭐（重点关注！即使没看到碰撞瞬间也要识别）
+8. **人员下车查看**：车辆旁边站着人员（司机或乘客下车站立）
+9. **异常停车位置**：车辆停在路口中央、斑马线上、车道中间等非正常位置
+10. **围观聚集**：多人围观或聚集在某个区域
+11. **交警/救援人员**：穿制服人员在现场处理
+12. **警示设置**：三角警示牌、警示灯、锥桶等
+
+【事故判定标准】（满足任一即可判定为事故）
+- 可见明显的物理碰撞瞬间（两个目标接触）
+- 碰撞后目标出现异常运动状态（急停、打滑、失控、翻倒）
+- 人员倒地或明显受伤迹象
+- 车辆明显受损或在非正常位置停止
+- 多个目标异常聚集在一起
+- 车辆停在非正常位置（路口中央、车道内）且有人员在旁边站立
+- 事故后静态场景（即使没有看到碰撞瞬间，也要报告）
+
+【重要提示】
+⚠️ 对于事故检测，**宁可多报也不要漏报**
+⚠️ 如发现疑似碰撞迹象，即使不完全确定也应该报告
+⚠️ 特别关注：目标位置重叠、轨迹交叉、速度突变、人员/车辆倒地
+⚠️ **即使只看到事故后场景（如车辆停在路中央、人员站在车旁），也要报告为事故**
+
+请严格按照以下JSON格式输出，不要输出任何多余内容：
+{
+  "has_accident": bool,
+  "accidents": [
+    {
+      "type": "事故类型",
+      "confidence": 置信度(0.0-1.0),
+      "tracks": [涉及的目标ID列表],
+      "collision_time_in_clip": "碰撞发生的clip内时间（秒数），如'约8.3秒'，根据图片时间对应关系填写",
+      "collision_time_in_video": "碰撞发生的原视频绝对时间（秒数），如'约44.3秒'，计算方式：片段起始时间 + clip内时间",
+      "collision_real_time": "从视频画面水印读取的真实物理时间，如'2025-10-17 07:47:02'，如无法读取则填'未知'",
+      "evidence": "判断依据（描述你观察到的碰撞迹象）",
+      "severity": "严重程度（轻微/一般/严重）",
+      "behavior_before": "事故发生前的目标行为描述",
+      "behavior_after": "事故发生后的目标行为描述",
+      "trajectory_description": "详细的轨迹描述",
+      "description": "事故详细描述"
+    }
+  ],
+  "text_summary": "对事故的完整描述，包含事故全过程"
 }
 """
 
@@ -124,6 +237,7 @@ class VLMClient:
         tracks_text: str,
         traffic_light_text: str,
         user_query: str,
+        clip_info: Optional[Dict] = None,
     ) -> Dict:
         user_prompt = self.build_user_prompt(intersection_info, tracks_text, traffic_light_text, user_query)
         contents: List[Dict] = [{"type": "text", "text": user_prompt}]
@@ -140,15 +254,224 @@ class VLMClient:
             {"role": "user", "content": contents},
         ]
 
+        # 打印发送给VLM的数据（调试用）
+        print("\n" + "="*60)
+        print("[VLM请求] 违法检测模式")
+        print("="*60)
+        print(f"[模型]: {self.config.model}")
+        print(f"[温度]: {self.config.temperature}")
+        print(f"[图片数量]: {len(annotated_images[:self.config.annotated_frames_per_clip])}")
+        print(f"[图片路径]: {annotated_images[:self.config.annotated_frames_per_clip]}")
+        print("-"*60)
+        print("[User Prompt]:")
+        print(user_prompt)
+        print("="*60 + "\n")
+
         completion = self.client.chat.completions.create(
             model=self.config.model,
             messages=messages,
             temperature=self.config.temperature,
         )
         text = completion.choices[0].message.content
+
+        # 打印VLM返回结果
+        print("\n" + "="*60)
+        print("[VLM响应]")
+        print("="*60)
+        print(text)
+        print("="*60 + "\n")
+
         try:
             # 尝试提取 JSON
             parsed = json.loads(text)
         except Exception:
             parsed = {"has_violation": False, "violations": [], "text_summary": text}
+
+        # 保存VLM请求和响应日志
+        _save_vlm_request_log(
+            mode="violation",
+            model=self.config.model,
+            temperature=self.config.temperature,
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            image_paths=annotated_images[:self.config.annotated_frames_per_clip],
+            response_text=text,
+            parsed_response=parsed,
+            clip_info=clip_info,
+        )
+
+        return parsed
+
+    def _parse_frame_time_from_path(self, path: str) -> Optional[float]:
+        """从标注帧文件名中解析时间（秒）
+
+        文件名格式: camera-1_20251210_clip-e8475403_003.600_annotated.jpg
+        提取: 003.600 -> 3.6秒
+        """
+        import re
+        basename = os.path.basename(path)
+        # 匹配 _NNN.NNN_annotated 格式
+        match = re.search(r'_(\d+\.\d+)_annotated', basename)
+        if match:
+            return float(match.group(1))
+        return None
+
+    def build_accident_user_prompt(
+        self,
+        intersection_info: Dict,
+        tracks_text: str,
+        traffic_light_text: str,
+        user_query: str,
+        clip_info: Optional[Dict] = None,
+        annotated_images: Optional[List[str]] = None,
+    ) -> str:
+        """事故检索模式专用的 User Prompt - 更积极主动地寻找事故迹象"""
+
+        # 构建clip时间信息
+        clip_time_info = ""
+        clip_start = 0.0
+        if clip_info:
+            clip_duration = clip_info.get('duration', 0)
+            clip_start = clip_info.get('start_time', 0)
+            clip_end = clip_info.get('end_time', 0)
+            clip_time_info = f"""
+## 视频片段时间信息（⚠️重要：用于计算原视频绝对时间）
+- 片段时长: {clip_duration:.1f}秒
+- **片段起始时间（原视频）: {clip_start:.1f}秒** ← 用于计算collision_time_in_video
+- 片段结束时间（原视频）: {clip_end:.1f}秒
+"""
+
+        # 构建帧时间映射，同时计算原视频绝对时间
+        frame_time_info = ""
+        if annotated_images:
+            frame_times = []
+            for i, img_path in enumerate(annotated_images):
+                frame_time = self._parse_frame_time_from_path(img_path)
+                if frame_time is not None:
+                    video_time = clip_start + frame_time
+                    frame_times.append(f"图片{i+1}: clip内{frame_time:.1f}秒 → 原视频{video_time:.1f}秒")
+            if frame_times:
+                frame_time_info = f"""
+## 图片时间对应关系（⚠️重要：用于填写时间字段）
+{chr(10).join(frame_times)}
+"""
+
+        return f"""
+## 路口配置
+- 路口类型: {intersection_info.get('intersection_type', '未知')}
+- 车道方向说明: {intersection_info.get('direction_description', '未提供')}
+- 非机动车道位置: {intersection_info.get('bike_lane_description', '未提供')}
+{clip_time_info}{frame_time_info}
+## 结构化轨迹概要
+{tracks_text or '暂无轨迹数据'}
+
+## 信号灯状态
+{traffic_light_text or '未检测到信号灯状态'}
+
+## 用户检索意图
+{user_query}
+
+请仔细观察附带的标注图片，**主动寻找**任何可能的交通事故迹象。
+
+【重点关注 - 碰撞瞬间】
+1. 观察是否有两个或多个目标发生接触、碰撞
+2. 观察是否有目标（行人、骑车人）倒在地面
+3. 观察是否有目标轨迹突然改变或停止
+4. 观察是否有散落物或碎片
+
+【重点关注 - 事故后场景】⭐⭐
+5. 观察是否有车辆停在异常位置（路口中央、斑马线上、车道中间）
+6. 观察是否有人员站在车辆旁边（可能是司机/乘客下车查看）
+7. 观察是否有多人围观或聚集在某个区域
+8. 观察是否有交警或救援人员在现场
+
+⚠️ 即使没有看到碰撞瞬间，只要发现事故后场景特征，也要判定为事故！
+
+【时间字段填写说明】⭐⭐⭐
+- collision_time_in_clip: 使用上方"图片时间对应关系"中的"clip内X秒"
+- collision_time_in_video: 使用上方"图片时间对应关系"中的"原视频X秒"
+- collision_real_time: 仔细观察图片中的**视频水印时间**（通常在画面角落显示年月日时分秒），如"2025-10-17 07:47:02"
+
+请严格按JSON格式输出分析结果。
+"""
+
+    def analyze_accident(
+        self,
+        annotated_images: List[str],
+        intersection_info: Dict,
+        tracks_text: str,
+        traffic_light_text: str,
+        user_query: str,
+        clip_info: Optional[Dict] = None,
+    ) -> Dict:
+        """事故检索模式专用分析方法"""
+        # 使用事故专用帧数配置（如果有），否则使用默认配置
+        frames_limit = getattr(self.config, 'accident_frames_per_clip', self.config.annotated_frames_per_clip)
+        # 传递clip_info和annotated_images以便生成帧时间映射
+        images_to_send = annotated_images[:frames_limit]
+        user_prompt = self.build_accident_user_prompt(
+            intersection_info, tracks_text, traffic_light_text, user_query,
+            clip_info=clip_info,
+            annotated_images=images_to_send,
+        )
+
+        contents: List[Dict] = [{"type": "text", "text": user_prompt}]
+        for img_path in annotated_images[:frames_limit]:
+            contents.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_to_base64_url(img_path)},
+                }
+            )
+
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": ACCIDENT_SYSTEM_PROMPT}]},
+            {"role": "user", "content": contents},
+        ]
+
+        # 打印发送给VLM的数据（调试用）
+        print("\n" + "="*60)
+        print("[VLM请求] 事故检索模式")
+        print("="*60)
+        print(f"[模型]: {self.config.model}")
+        print(f"[温度]: {self.config.temperature}")
+        print(f"[图片数量]: {len(annotated_images[:frames_limit])}")
+        print(f"[图片路径]: {annotated_images[:frames_limit]}")
+        print("-"*60)
+        print("[User Prompt]:")
+        print(user_prompt)
+        print("="*60 + "\n")
+
+        completion = self.client.chat.completions.create(
+            model=self.config.model,
+            messages=messages,
+            temperature=self.config.temperature,
+        )
+        text = completion.choices[0].message.content
+
+        # 打印VLM返回结果
+        print("\n" + "="*60)
+        print("[VLM响应] 事故检索模式")
+        print("="*60)
+        print(text)
+        print("="*60 + "\n")
+
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = {"has_accident": False, "accidents": [], "text_summary": text}
+
+        # 保存VLM请求和响应日志
+        _save_vlm_request_log(
+            mode="accident",
+            model=self.config.model,
+            temperature=self.config.temperature,
+            system_prompt=ACCIDENT_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            image_paths=annotated_images[:frames_limit],
+            response_text=text,
+            parsed_response=parsed,
+            clip_info=clip_info,
+        )
+
         return parsed

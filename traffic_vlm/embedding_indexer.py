@@ -29,8 +29,33 @@ class EmbeddingIndexer:
     def __init__(self, config: EmbeddingConfig):
         self.config = config
         self.device = self._select_device(config.device)
-        self.processor = AutoProcessor.from_pretrained(config.model_name, trust_remote_code=True)
-        self.model = AutoModel.from_pretrained(config.model_name, trust_remote_code=True)
+
+        # 尝试离线加载，如果失败则联网下载
+        try:
+            print(f"[EmbeddingIndexer] 尝试从本地缓存加载模型: {config.model_name}")
+            self.processor = AutoProcessor.from_pretrained(
+                config.model_name,
+                trust_remote_code=True,
+                local_files_only=True  # 优先使用本地缓存
+            )
+            self.model = AutoModel.from_pretrained(
+                config.model_name,
+                trust_remote_code=True,
+                local_files_only=True  # 优先使用本地缓存
+            )
+            print(f"[EmbeddingIndexer] ✓ 从本地缓存加载成功")
+        except Exception as e:
+            print(f"[EmbeddingIndexer] 本地缓存不存在，开始联网下载模型...")
+            self.processor = AutoProcessor.from_pretrained(
+                config.model_name,
+                trust_remote_code=True
+            )
+            self.model = AutoModel.from_pretrained(
+                config.model_name,
+                trust_remote_code=True
+            )
+            print(f"[EmbeddingIndexer] ✓ 模型下载并缓存完成")
+
         self.model.to(self.device)
         self.model.eval()
 

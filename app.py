@@ -5,11 +5,29 @@ Qwen3-VL 视频分析 Web 应用
 
 import sys
 import io
+import os
 
 # 设置标准输出为 UTF-8 编码（Windows 兼容）
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# 设置 HuggingFace 模型缓存目录，避免重复下载
+HF_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models", "huggingface")
+os.makedirs(HF_CACHE_DIR, exist_ok=True)
+os.environ["HF_HOME"] = HF_CACHE_DIR
+os.environ["TRANSFORMERS_CACHE"] = HF_CACHE_DIR
+
+# 检查模型是否已缓存，如果已缓存则启用离线模式
+_siglip_cache_path = os.path.join(HF_CACHE_DIR, "hub", "models--google--siglip-base-patch16-384")
+if os.path.exists(_siglip_cache_path):
+    os.environ["HF_HUB_OFFLINE"] = "1"  # 强制离线模式，不联网检查更新
+    print(f"[HuggingFace] ✓ 检测到本地缓存，启用离线模式")
+else:
+    # 使用国内镜像加速下载
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+    print(f"[HuggingFace] 本地缓存不存在，使用镜像站下载模型...")
+print(f"[HuggingFace] 模型缓存目录: {HF_CACHE_DIR}")
 
 from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
 import os
@@ -70,6 +88,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # 全局进度队列（用于SSE推送）
 progress_queues = {}
+
+# 全局停止标志（用于中断分析）
+stop_flags = {}
+
+
+def is_stopped(session_id: str) -> bool:
+    """检查会话是否已被请求停止"""
+    return stop_flags.get(session_id, False)
 
 # 阿里云 DashScope API 配置
 # 从环境变量获取 API Key，或者直接在这里设置
@@ -215,13 +241,14 @@ def compress_video(input_path, output_path, target_size_mb=6.5, session_id=None)
         input_size_mb = os.path.getsize(input_path) / (1024 * 1024)
 
         # 动态设定分辨率/帧率策略（随目标码率降低）
+        # 最小宽度854，避免过度压缩损失细节
         scale_width = None
         output_fps = None
         if target_bitrate < 220:
-            scale_width = 480
+            scale_width = 854  # 最小宽度854
             output_fps = 15
         elif target_bitrate < 350:
-            scale_width = 640
+            scale_width = 854  # 最小宽度854
             output_fps = 20
         elif target_bitrate < 600:
             scale_width = 854
@@ -829,7 +856,7 @@ def frames_to_base64_images(frames, max_tokens=250000):
 
         # 转换为JPEG并压缩
         buffer = io.BytesIO()
-        frame.save(buffer, format='JPEG', quality=70, optimize=True)
+        frame.save(buffer, format='JPEG', quality=85, optimize=True)  # 提高质量，保留更多细节
         img_bytes = buffer.getvalue()
 
         # 编码为base64
@@ -1237,10 +1264,18 @@ def analyze():
             compressed_path = None
             final_video_path = filepath
             try:
+                # 检查是否已被停止
+                if is_stopped(session_id):
+                    print(f"[Session {session_id}] 任务已被停止（启动前）")
+                    return
+
                 user_intent = event_query or prompt
                 video_source_path = video_url if video_url else filepath
 
                 def pipeline_progress(percent, message):
+                    # 检查是否已被停止
+                    if is_stopped(session_id):
+                        raise InterruptedError("分析已被用户停止")
                     progress_queues[session_id].put({
                         'type': 'analysis',
                         'progress': int(percent),
@@ -1300,6 +1335,11 @@ def analyze():
                     return "\n".join(analysis_parts)
 
                 if analysis_mode == 'traffic_vlm':
+                    # 检查是否已被停止
+                    if is_stopped(session_id):
+                        print(f"[Session {session_id}] 任务已被停止（pipeline启动前）")
+                        return
+
                     print(f"\n{'='*60}")
                     print(f"TrafficVLM pipeline start (Session: {session_id})")
                     print(f"Source: {video_source_path}")
@@ -1309,7 +1349,7 @@ def analyze():
 
                     try:
                         pipeline = TrafficVLMPipeline(config=TrafficVLMConfig(), progress_cb=pipeline_progress)
-                        pipeline_result = pipeline.run(video_source_path, user_intent, camera_id=camera_id)
+                        pipeline_result = pipeline.run(video_source_path, user_intent, camera_id=camera_id, mode="violation")
 
                         # 返回详细的分析结果，而不是摘要
                         detailed_analysis = extract_detailed_analysis(pipeline_result)
@@ -1324,10 +1364,53 @@ def analyze():
                             'pipeline': pipeline_result
                         }
                         progress_queues[session_id].put(response_data)
+                    except InterruptedError as e:
+                        print(f"[Session {session_id}] TrafficVLM pipeline 被用户停止")
+                        # 不发送错误消息，停止消息已通过 /stop 端点发送
                     except Exception as e:
                         progress_queues[session_id].put({
                             'type': 'error',
                             'message': f'TrafficVLM pipeline failed: {str(e)}'
+                        })
+                    return
+
+                if analysis_mode == 'accident_search':
+                    # 检查是否已被停止
+                    if is_stopped(session_id):
+                        print(f"[Session {session_id}] 任务已被停止（accident pipeline启动前）")
+                        return
+
+                    print(f"\n{'='*60}")
+                    print(f"Accident Search pipeline start (Session: {session_id})")
+                    print(f"Source: {video_source_path}")
+                    print(f"Camera ID: {camera_id}")
+                    print(f"Query: {user_intent}")
+                    print(f"{'='*60}\n")
+
+                    try:
+                        pipeline = TrafficVLMPipeline(config=TrafficVLMConfig(), progress_cb=pipeline_progress)
+                        pipeline_result = pipeline.run(video_source_path, user_intent, camera_id=camera_id, mode="accident")
+
+                        # 返回详细的分析结果
+                        detailed_analysis = extract_detailed_analysis(pipeline_result)
+
+                        response_data = {
+                            'type': 'complete',
+                            'success': True,
+                            'result': detailed_analysis,
+                            'analysis_mode': 'accident_search',
+                            'video_source': video_source_path,
+                            'model': model,
+                            'pipeline': pipeline_result
+                        }
+                        progress_queues[session_id].put(response_data)
+                    except InterruptedError as e:
+                        print(f"[Session {session_id}] Accident Search pipeline 被用户停止")
+                        # 不发送错误消息，停止消息已通过 /stop 端点发送
+                    except Exception as e:
+                        progress_queues[session_id].put({
+                            'type': 'error',
+                            'message': f'Accident Search pipeline failed: {str(e)}'
                         })
                     return
 
@@ -1475,6 +1558,15 @@ def analyze():
 
                     progress_queues[session_id].put(response_data)
 
+            except InterruptedError as e:
+                # 用户主动停止分析
+                print(f"\n[Session {session_id}] 分析被用户停止: {str(e)}\n")
+                if compressed_path and os.path.exists(compressed_path):
+                    try:
+                        os.remove(compressed_path)
+                    except:
+                        pass
+                # 不发送错误消息，停止消息已通过 /stop 端点发送
             except Exception as e:
                 print(f"\nError: {str(e)}\n")
                 if compressed_path and os.path.exists(compressed_path):
@@ -1487,6 +1579,10 @@ def analyze():
                     'type': 'error',
                     'message': str(e)
                 })
+            finally:
+                # 清理会话资源
+                if session_id in stop_flags:
+                    del stop_flags[session_id]
 
         # 启动后台线程
         thread = threading.Thread(target=process_video)
@@ -1514,6 +1610,38 @@ def download(filename):
             return jsonify({'error': '文件不存在'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/stop/<session_id>', methods=['POST'])
+def stop_analysis(session_id):
+    """停止指定会话的分析任务"""
+    try:
+        print(f"\n{'='*60}")
+        print(f"收到停止请求 (Session: {session_id})")
+        print(f"{'='*60}\n")
+
+        # 设置停止标志
+        stop_flags[session_id] = True
+
+        # 向队列发送停止消息
+        if session_id in progress_queues:
+            progress_queues[session_id].put({
+                'type': 'stopped',
+                'message': '分析已停止'
+            })
+
+        return jsonify({
+            'success': True,
+            'message': '停止请求已发送',
+            'session_id': session_id
+        })
+
+    except Exception as e:
+        print(f"停止分析错误: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/health', methods=['GET'])
 def health():

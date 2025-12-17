@@ -41,7 +41,17 @@ class ClusterConfig:
     pre_padding: float = 4.0
     post_padding: float = 7.0
     clip_sampling_frames: int = 8
+    accident_clip_sampling_frames: int = 16  # 事故模式：更密集采样
     candidate_clip_top_k: int = 12
+    max_clip_duration: float = 30.0  # 单个clip最大时长（秒），防止clip覆盖整个视频
+    accident_merge_window_seconds: float = 10.0  # 事故场景放宽时间窗口
+    accident_max_clip_duration: float = 45.0  # 事故场景允许更长片段
+    accident_pre_padding: float = 10.0  # 事故簇默认更长的前置缓冲（增加到10秒以捕获事故前状态）
+    accident_post_padding: float = 10.0  # 事故簇默认更长的后置缓冲
+    accident_long_extra_pre: float = 2.0  # 事故长版额外前置缓冲
+    accident_long_extra_post: float = 5.0  # 事故长版额外后置缓冲
+    accident_score_weight: float = 0.6  # clip_score 中事故信号的权重
+    accident_score_threshold: float = 0.35  # 判定事故簇的下限
 
 
 @dataclass
@@ -49,11 +59,12 @@ class DetectorConfig:
     """本地检测与跟踪配置（可选）。"""
 
     enabled: bool = True
-    model_path: str = "yolov8n.pt"
+    model_path: str = "yolo11s.pt"  # 升级到YOLO11s，遮挡和异常姿态检测更好
     tracker: str = "bytetrack"
-    confidence_threshold: float = 0.2
+    confidence_threshold: float = 0.2  # 配置一: 置信度阈值
     iou_threshold: float = 0.45
     max_detections: int = 100
+    imgsz: int = 1280  # 配置一: 检测图像尺寸
 
 
 @dataclass
@@ -63,6 +74,7 @@ class VLMConfig:
     model: str = "qwen3-vl-plus"
     top_clips: int = 3
     annotated_frames_per_clip: int = 6
+    accident_frames_per_clip: int = 12  # 事故模式：发送更多帧给VLM
     temperature: float = 0.4
 
 
