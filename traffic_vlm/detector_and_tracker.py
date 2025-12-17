@@ -54,13 +54,14 @@ class DetectorAndTracker:
 
         print(f"[DetectorAndTracker] 输入帧数: {len(frames)}")
 
+        # 标记是否已回退到 FP32（避免每帧重复打印）
+        _half_fallback_logged = False
+
         for ts, frame in frames:
             preds = None
             try:
-                # 使用 track() 而不是 predict()，启用跨帧跟踪
-                # persist=True 保持跟踪器状态，使同一目标跨帧保持相同ID
-                preds = self.model.track(
-                    frame,
+                # 构建 track 参数，half 参数可能不被接收需要兼容处理
+                track_kwargs = dict(
                     conf=self.config.confidence_threshold,
                     iou=self.config.iou_threshold,
                     imgsz=getattr(self.config, 'imgsz', 1280),
@@ -68,6 +69,17 @@ class DetectorAndTracker:
                     tracker="traffic_vlm/custom_bytetrack.yaml",  # 自定义配置：track_buffer=120
                     verbose=False,
                 )
+                # 尝试启用 FP16，如果 track() 不支持会忽略
+                try:
+                    preds = self.model.track(frame, half=True, **track_kwargs)
+                except TypeError as e:
+                    if "half" in str(e):
+                        if not _half_fallback_logged:
+                            print("[DetectorAndTracker] ⚠️ track() 不支持 half 参数，回退到 FP32")
+                            _half_fallback_logged = True
+                        preds = self.model.track(frame, **track_kwargs)
+                    else:
+                        raise
             except Exception as e:
                 # 不再 break，继续处理后续帧
                 print(f"[DetectorAndTracker] ⚠️ 帧 {ts:.3f}s 检测异常: {e}")

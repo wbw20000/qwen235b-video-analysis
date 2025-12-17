@@ -84,12 +84,22 @@ class EmbeddingIndexer:
 
         outputs = []
         batch_size = max(1, self.config.batch_size)
+        # 加固：稳健的 CUDA 检测（支持 "cuda" 和 "cuda:0" 等形式）
+        use_amp = "cuda" in str(self.device)
+
         for start in range(0, len(batches), batch_size):
             batch_imgs = batches[start : start + batch_size]
             inputs = self.processor(images=batch_imgs, return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                image_features = self.model.get_image_features(**inputs)
+            # 优化：inference_mode + autocast（官方推荐写法）
+            with torch.inference_mode():
+                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                    image_features = self.model.get_image_features(**inputs)
+            # 加固：归一化前转 FP32，保证排序稳定性
+            image_features = image_features.float()
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            # 验证：检查 NaN/Inf
+            if not torch.isfinite(image_features).all():
+                print("[EmbeddingIndexer] ⚠️ encode_images 输出包含 NaN/Inf！")
             outputs.append(image_features.cpu().numpy())
 
         return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, 1), dtype=np.float32)
@@ -102,6 +112,9 @@ class EmbeddingIndexer:
             max_len = int(getattr(self.model.config.text_config, "max_position_embeddings", max_len))
         except Exception:
             pass
+        # 加固：稳健的 CUDA 检测（支持 "cuda" 和 "cuda:0" 等形式）
+        use_amp = "cuda" in str(self.device)
+
         for start in range(0, len(texts), batch_size):
             batch_texts = texts[start : start + batch_size]
             inputs = self.processor(
@@ -111,9 +124,16 @@ class EmbeddingIndexer:
                 max_length=max_len,
                 return_tensors="pt",
             ).to(self.device)
-            with torch.no_grad():
-                text_features = self.model.get_text_features(**inputs)
+            # 优化：inference_mode + autocast（官方推荐写法）
+            with torch.inference_mode():
+                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                    text_features = self.model.get_text_features(**inputs)
+            # 加固：归一化前转 FP32，保证排序稳定性
+            text_features = text_features.float()
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            # 验证：检查 NaN/Inf
+            if not torch.isfinite(text_features).all():
+                print("[EmbeddingIndexer] ⚠️ encode_texts 输出包含 NaN/Inf！")
             outputs.append(text_features.cpu().numpy())
         return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, 1), dtype=np.float32)
 
