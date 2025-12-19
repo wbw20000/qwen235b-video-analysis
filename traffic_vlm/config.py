@@ -77,6 +77,15 @@ class VLMConfig:
     accident_frames_per_clip: int = 12  # 事故模式：发送更多帧给VLM
     temperature: float = 0.4
 
+    # P0优化：VLM调用阈值过滤
+    clip_score_threshold: float = 0.35  # clip_score低于此值跳过VLM调用
+    skip_low_score_vlm: bool = True     # 是否启用阈值过滤
+
+    # P0优化：图像压缩减少传输
+    image_max_width: int = 960          # 图像最大宽度（像素）
+    image_quality: int = 70             # JPEG压缩质量（1-100）
+    compress_images: bool = True        # 是否启用图像压缩
+
 
 @dataclass
 class DataStoreConfig:
@@ -274,6 +283,23 @@ class BatchProcessConfig:
     batch_temp_dir: str = "temp/batch"   # 批量任务临时目录
     batch_result_dir: str = "data/batch_reports"  # 批量任务结果目录
     generate_summary_report: bool = True  # 生成汇总报告
+
+    # P0优化：广度优先遍历模式
+    traversal_mode: str = "breadth_first"  # depth_first=深度优先(原逻辑), breadth_first=广度优先
+    cameras_per_road_first_pass: int = 1   # 第一轮每路口处理的摄像头数
+    prioritize_accident_roads: bool = True # 检出事故的路口优先深入分析
+    second_pass_enabled: bool = True       # 是否启用第二轮深入分析
+
+    # 高峰时段优先遍历（由前端传入，此处为默认值）
+    peak_hours_enabled: bool = False       # 是否启用高峰时段优先（前端传入时覆盖）
+    default_peak_hours: List[Tuple[str, str]] = field(default_factory=lambda: [
+        ("07:00", "09:00"),  # 早高峰
+        ("17:00", "19:00"),  # 晚高峰
+    ])
+
+    # 随机化选项
+    randomize_road_order: bool = True      # 随机化路口遍历顺序
+    randomize_camera_selection: bool = True # 随机选择摄像头
 
     def ensure_dirs(self):
         os.makedirs(self.batch_temp_dir, exist_ok=True)

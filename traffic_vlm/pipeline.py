@@ -218,7 +218,22 @@ class TrafficVLMPipeline:
         vlm_client = VLMClient(self.config.vlm)
 
         final_results = []
+        skipped_clips = []  # 记录因阈值过滤跳过的clip
+
         for idx, clip in enumerate(suspect_clips[: self.config.vlm.top_clips]):
+            # P0优化：clip_score阈值过滤
+            clip_score = clip.get("clip_score", 0.0)
+            threshold = self.config.vlm.clip_score_threshold
+
+            if self.config.vlm.skip_low_score_vlm and clip_score < threshold:
+                print(f"[pipeline] ⏭️ 跳过 clip {clip['clip_id']}: clip_score={clip_score:.3f} < 阈值{threshold}")
+                skipped_clips.append({
+                    "clip": clip,
+                    "reason": f"clip_score={clip_score:.3f} < {threshold}",
+                    "skipped": True
+                })
+                continue
+
             # 根据clip来源决定采样时间范围
             if clip.get("clip_source") == "clipped":
                 # 剪辑成功：使用相对时间（0到duration）
@@ -340,10 +355,22 @@ class TrafficVLMPipeline:
 
         self._progress(100, "分析完成")
         manager.release()
+
+        # 统计VLM调用情况
+        vlm_stats = {
+            "total_clips": len(suspect_clips[:self.config.vlm.top_clips]),
+            "analyzed_clips": len(final_results),
+            "skipped_clips": len(skipped_clips),
+            "threshold": self.config.vlm.clip_score_threshold if self.config.vlm.skip_low_score_vlm else None
+        }
+        print(f"[pipeline] VLM统计: 总clips={vlm_stats['total_clips']}, 分析={vlm_stats['analyzed_clips']}, 跳过={vlm_stats['skipped_clips']}")
+
         return {
             "keyframes": keyframes,
             "clips": suspect_clips,
             "results": final_results,
+            "skipped_clips": skipped_clips,
+            "vlm_stats": vlm_stats,
             "templates": templates,
         }
 

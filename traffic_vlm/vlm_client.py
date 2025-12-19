@@ -180,9 +180,50 @@ ACCIDENT_SYSTEM_PROMPT = """
 """
 
 
-def image_to_base64_url(path: str) -> str:
-    with open(path, "rb") as f:
-        data = base64.b64encode(f.read()).decode("utf-8")
+def image_to_base64_url(path: str, max_width: int = None, quality: int = None) -> str:
+    """
+    将图像转换为base64 URL，支持可选的压缩
+
+    Args:
+        path: 图像文件路径
+        max_width: 最大宽度（像素），超过则缩放
+        quality: JPEG压缩质量（1-100），None表示不压缩
+    """
+    if max_width is None and quality is None:
+        # 无压缩，直接读取
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:image/jpeg;base64,{data}"
+
+    # 需要压缩处理
+    from PIL import Image
+    import io
+
+    img = Image.open(path)
+    original_size = os.path.getsize(path)
+
+    # 缩放处理
+    if max_width and img.width > max_width:
+        ratio = max_width / img.width
+        new_height = int(img.height * ratio)
+        img = img.resize((max_width, new_height), Image.LANCZOS)
+
+    # 转换为RGB（去除alpha通道）
+    if img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+
+    # 压缩并编码
+    buffer = io.BytesIO()
+    save_quality = quality or 85
+    img.save(buffer, format='JPEG', quality=save_quality, optimize=True)
+    compressed_data = buffer.getvalue()
+    compressed_size = len(compressed_data)
+
+    # 打印压缩效果（仅首次）
+    compression_ratio = (1 - compressed_size / original_size) * 100
+    print(f"[图像压缩] {os.path.basename(path)}: {original_size//1024}KB → {compressed_size//1024}KB (节省{compression_ratio:.1f}%)")
+
+    data = base64.b64encode(compressed_data).decode("utf-8")
     return f"data:image/jpeg;base64,{data}"
 
 
@@ -241,11 +282,16 @@ class VLMClient:
     ) -> Dict:
         user_prompt = self.build_user_prompt(intersection_info, tracks_text, traffic_light_text, user_query)
         contents: List[Dict] = [{"type": "text", "text": user_prompt}]
+
+        # P0优化：图像压缩
+        max_width = self.config.image_max_width if self.config.compress_images else None
+        quality = self.config.image_quality if self.config.compress_images else None
+
         for img_path in annotated_images[: self.config.annotated_frames_per_clip]:
             contents.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": image_to_base64_url(img_path)},
+                    "image_url": {"url": image_to_base64_url(img_path, max_width=max_width, quality=quality)},
                 }
             )
 
@@ -416,11 +462,16 @@ class VLMClient:
         )
 
         contents: List[Dict] = [{"type": "text", "text": user_prompt}]
+
+        # P0优化：图像压缩
+        max_width = self.config.image_max_width if self.config.compress_images else None
+        quality = self.config.image_quality if self.config.compress_images else None
+
         for img_path in annotated_images[:frames_limit]:
             contents.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": image_to_base64_url(img_path)},
+                    "image_url": {"url": image_to_base64_url(img_path, max_width=max_width, quality=quality)},
                 }
             )
 

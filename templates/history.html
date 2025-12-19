@@ -406,25 +406,82 @@
 
         /* 当前路口详情 */
         .current-road-detail {
-            background: var(--bg-dark);
-            border: 1px solid var(--border);
+            background: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+            border: 1px solid var(--accent-blue);
             border-radius: 8px;
             padding: 15px;
             margin-top: 15px;
+            color: white;
         }
 
         .current-road-header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            gap: 10px;
+            margin-bottom: 12px;
             padding-bottom: 10px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .processing-badge {
+            background: #4caf50;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
         }
 
         .current-road-title {
             font-weight: 600;
-            color: var(--accent-cyan);
+            color: white;
+        }
+
+        .current-camera-info {
+            padding: 5px 0;
+        }
+
+        .camera-progress {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .camera-progress strong {
+            color: #90caf9;
+        }
+
+        .camera-counter {
+            color: #90caf9;
+            margin-left: 10px;
+            font-size: 14px;
+        }
+
+        .camera-progress-bar-mini {
+            height: 8px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+
+        .camera-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .camera-status-text {
+            font-size: 13px;
+            color: rgba(255,255,255,0.85);
+            margin-top: 5px;
         }
 
         /* 分析策略选择 */
@@ -1238,11 +1295,20 @@
             <!-- 当前路口详情 -->
             <div class="current-road-detail" id="currentRoadDetail" style="display: none;">
                 <div class="current-road-header">
-                    <span class="current-road-title">当前路口: <span id="currentRoadId">-</span></span>
-                    <span id="currentRoadProgress">-</span>
+                    <span class="processing-badge">处理中</span>
+                    <span class="current-road-title">路口: <span id="currentRoadId">-</span> (<span id="currentRoadName">-</span>)</span>
                 </div>
-                <div id="currentRoadSegments">
-                    <!-- 复用现有的片段表格 -->
+                <div class="current-camera-info">
+                    <div class="camera-progress">
+                        <span>摄像头: <strong id="currentCameraNum">-</strong></span>
+                        <span class="camera-counter">
+                            (<span id="currentCameraIndex">0</span> / <span id="currentTotalCameras">0</span>)
+                        </span>
+                    </div>
+                    <div class="camera-progress-bar-mini">
+                        <div class="camera-progress-fill" id="cameraProgressFill" style="width: 0%;"></div>
+                    </div>
+                    <div class="camera-status-text" id="cameraStatusText">等待开始...</div>
                 </div>
             </div>
         </div>
@@ -1872,6 +1938,17 @@
                 const data = JSON.parse(e.data);
                 addLog('info', `开始处理路口 ${data.road_id} (${data.road_index + 1}/${data.total_roads})`, 'download');
                 updateRoadRowStatus(data.road_id, 'running', data.camera_count);
+
+                // 显示当前路口详情
+                const detailDiv = document.getElementById('currentRoadDetail');
+                detailDiv.style.display = 'block';
+                document.getElementById('currentRoadId').textContent = data.road_id;
+                document.getElementById('currentRoadName').textContent = data.road_name || '-';
+                document.getElementById('currentTotalCameras').textContent = '获取中...';
+                document.getElementById('currentCameraIndex').textContent = '0';
+                document.getElementById('currentCameraNum').textContent = '-';
+                document.getElementById('cameraProgressFill').style.width = '0%';
+                document.getElementById('cameraStatusText').textContent = '正在获取摄像头列表...';
             });
 
             // 路口完成
@@ -1879,6 +1956,10 @@
                 const data = JSON.parse(e.data);
                 addLog('success', `路口 ${data.road_id} 完成，检出 ${data.events_found} 起`, 'download');
                 updateRoadRowStatus(data.road_id, 'completed', data.total_cameras, data.events_found);
+
+                // 更新当前路口详情为完成状态
+                document.getElementById('cameraProgressFill').style.width = '100%';
+                document.getElementById('cameraStatusText').textContent = '等待下一个路口...';
             });
 
             // 路口跳过
@@ -1891,13 +1972,36 @@
             // 摄像头开始
             batchEventSource.addEventListener('camera_start', function(e) {
                 const data = JSON.parse(e.data);
-                addLog('info', `开始处理摄像头 ${data.channel_num}`, 'analyze');
+                addLog('info', `开始处理摄像头 ${data.channel_num} (${data.camera_index + 1}/${data.total_cameras})`, 'analyze');
+
+                // 更新当前摄像头信息
+                document.getElementById('currentCameraNum').textContent = data.channel_num;
+                document.getElementById('currentCameraIndex').textContent = data.camera_index + 1;
+                document.getElementById('currentTotalCameras').textContent = data.total_cameras;
+
+                // 更新进度条
+                const percent = Math.round((data.camera_index / data.total_cameras) * 100);
+                document.getElementById('cameraProgressFill').style.width = percent + '%';
+
+                // 更新状态文本
+                document.getElementById('cameraStatusText').textContent =
+                    `正在分析摄像头 ${data.channel_num}... (已完成 ${data.camera_index}/${data.total_cameras})`;
             });
 
             // 摄像头完成
             batchEventSource.addEventListener('camera_complete', function(e) {
                 const data = JSON.parse(e.data);
                 addLog('success', `摄像头 ${data.channel_num} 完成，检出 ${data.events_found} 起`, 'analyze');
+
+                // 更新进度条（完成一个摄像头）
+                const currentIndex = parseInt(document.getElementById('currentCameraIndex').textContent) || 0;
+                const totalCameras = parseInt(document.getElementById('currentTotalCameras').textContent) || 1;
+                const percent = Math.round((currentIndex / totalCameras) * 100);
+                document.getElementById('cameraProgressFill').style.width = percent + '%';
+
+                // 更新状态文本
+                document.getElementById('cameraStatusText').textContent =
+                    `摄像头 ${data.channel_num} 完成 (${currentIndex}/${totalCameras})`;
             });
 
             // 日志事件
@@ -1936,6 +2040,9 @@
                     downloadBtn.onclick = () => window.open(data.report_url, '_blank');
                 }
 
+                // 隐藏当前路口详情
+                document.getElementById('currentRoadDetail').style.display = 'none';
+
                 showToast('批量任务完成！', 'success');
                 resetUI();
 
@@ -1950,6 +2057,7 @@
                 const data = JSON.parse(e.data);
                 addLog('error', `批量任务出错: ${data.error}`);
                 showError('批量任务出错: ' + data.error);
+                document.getElementById('currentRoadDetail').style.display = 'none';
                 resetUI();
 
                 if (batchEventSource) {
