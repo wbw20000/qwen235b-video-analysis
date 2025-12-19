@@ -38,7 +38,7 @@ import re
 import json
 import time
 import threading
-from queue import Queue
+from queue import Queue, Empty
 from openai import OpenAI
 
 # 新增：视频抽帧相关导入
@@ -47,7 +47,7 @@ import numpy as np
 from PIL import Image
 import tempfile
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # TrafficVLM 模块
 from traffic_vlm.pipeline import TrafficVLMPipeline
@@ -1664,6 +1664,475 @@ def config_info():
         'max_video_size_mb': MAX_VIDEO_SIZE / (1024 * 1024),
         'allowed_extensions': list(ALLOWED_EXTENSIONS)
     })
+
+
+# ============================================================
+# 历史视频联网查询分析 API
+# ============================================================
+
+# 导入历史视频处理模块
+from traffic_vlm.tsingcloud_api import TsingcloudAPI, CameraInfo
+from traffic_vlm.history_video_processor import HistoryVideoProcessor, EventType
+from traffic_vlm.config import TsingcloudConfig, HistoryProcessConfig
+
+# 全局变量
+_tsingcloud_api = None
+_history_processor = None
+_history_sse_queues = {}  # task_id -> Queue
+
+
+def get_tsingcloud_api():
+    """获取云控智行API客户端（单例）"""
+    global _tsingcloud_api
+    if _tsingcloud_api is None:
+        # 从环境变量或配置获取凭据
+        app_key = os.environ.get('TSINGCLOUD_APP_KEY', 'wangbowen')
+        password = os.environ.get('TSINGCLOUD_PASSWORD', 'YwKSBcgWUI6')
+        config = TsingcloudConfig(app_key=app_key, password=password)
+        _tsingcloud_api = TsingcloudAPI(
+            app_key=config.app_key,
+            password=config.password,
+            base_url=config.base_url,
+            poll_interval=config.poll_interval,
+            poll_timeout=config.poll_timeout
+        )
+    return _tsingcloud_api
+
+
+def get_history_processor():
+    """获取历史视频处理器（单例）"""
+    global _history_processor
+    if _history_processor is None:
+        api = get_tsingcloud_api()
+        config = HistoryProcessConfig()
+
+        def event_callback(event_type: EventType, data: dict):
+            """SSE事件回调"""
+            task_id = data.get('task_id')
+            if task_id and task_id in _history_sse_queues:
+                _history_sse_queues[task_id].put({
+                    'event': event_type.value,
+                    'data': data
+                })
+
+        # 创建pipeline函数（调用现有的TrafficVLMPipeline）
+        def pipeline_func(video_path, user_query, mode, model, progress_callback=None):
+            """调用视频分析pipeline
+
+            Args:
+                video_path: 视频文件路径
+                user_query: 用户查询
+                mode: 分析模式 (accident/violation)
+                model: VLM模型
+                progress_callback: 进度回调函数 (percent: int, message: str) -> None
+            """
+            import traceback
+
+            # 创建进度回调包装器（同时输出到控制台和回调）
+            def progress_cb(percent, message):
+                if progress_callback:
+                    progress_callback(percent, message)
+                print(f"[Pipeline] ({percent}%) {message}")
+
+            progress_cb(0, f"开始分析: {video_path}")
+            print(f"[Pipeline] 查询: {user_query}, 模式: {mode}, 模型: {model}")
+
+            try:
+                from traffic_vlm.pipeline import TrafficVLMPipeline
+                from traffic_vlm.config import TrafficVLMConfig
+
+                progress_cb(1, "正在初始化 TrafficVLMPipeline...")
+                vlm_config = TrafficVLMConfig()
+                vlm_config.vlm.model = model
+
+                # 传入 progress_cb，让 Pipeline 内部的进度也能发送到前端
+                pipeline = TrafficVLMPipeline(config=vlm_config, progress_cb=progress_cb)
+                progress_cb(2, "Pipeline 初始化完成，开始分析...")
+
+                result = pipeline.run(video_path, user_query, mode=mode)
+                progress_cb(100, f"分析完成，结果数量: {len(result.get('results', []))}")
+
+                # 解析结果
+                has_event = False
+                event_type = None
+                confidence = 0.0
+
+                for item in result.get('results', []):
+                    vlm_out = item.get('vlm_output', {}) or {}
+                    if vlm_out.get('has_violation') or vlm_out.get('has_accident'):
+                        has_event = True
+                        violations = vlm_out.get('violations', [])
+                        if violations:
+                            event_type = violations[0].get('type', '未知事件')
+                            confidence = violations[0].get('confidence', 0.5)
+                        else:
+                            event_type = '检出异常'
+                            confidence = 0.5
+                        break
+
+                print(f"[Pipeline] 分析结果: has_event={has_event}, event_type={event_type}")
+                return {
+                    'has_event': has_event,
+                    'event_type': event_type,
+                    'confidence': confidence,
+                    'raw_result': result
+                }
+
+            except Exception as e:
+                # 打印完整的错误堆栈
+                print(f"[Pipeline] ❌ 分析失败: {e}")
+                traceback.print_exc()
+                # 重新抛出异常，让调用者处理
+                raise RuntimeError(f"Pipeline分析失败: {e}") from e
+
+        _history_processor = HistoryVideoProcessor(
+            api=api,
+            config=config,
+            pipeline_func=pipeline_func,
+            event_callback=event_callback
+        )
+
+    return _history_processor
+
+
+@app.route('/history')
+def history_page():
+    """历史视频分析页面"""
+    return render_template('history.html', models=AVAILABLE_MODELS)
+
+
+@app.route('/api/history/roads', methods=['GET'])
+def get_roads():
+    """获取可用路口列表"""
+    try:
+        # 从rcuid.csv读取路口列表（使用标准库csv模块，无需pandas）
+        import csv
+        csv_path = os.path.join(os.path.dirname(__file__), '车网路口视频流相关资料', 'rcuid.csv')
+
+        if os.path.exists(csv_path):
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:  # utf-8-sig 自动处理BOM
+                reader = csv.DictReader(f)
+                # 获取唯一的路口ID
+                road_ids = set()
+                for row in reader:
+                    rid = row.get('id', '').strip()
+                    if rid:
+                        road_ids.add(rid)
+                roads = [{'road_id': rid, 'road_name': f'路口 #{rid}'} for rid in sorted(road_ids, key=lambda x: int(x) if x.isdigit() else 0)]
+        else:
+            # 如果CSV不存在，返回默认列表
+            roads = [{'road_id': str(i), 'road_name': f'路口 #{i}'} for i in range(1, 11)]
+
+        return jsonify({
+            'success': True,
+            'roads': roads,
+            'total': len(roads)
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/cameras/<road_id>', methods=['GET'])
+def get_cameras(road_id):
+    """获取路口的摄像头列表"""
+    try:
+        api = get_tsingcloud_api()
+
+        # 使用当前时间作为查询时间（获取最新的摄像头列表）
+        now = datetime.now()
+        start_time = now.strftime("%Y%m%d%H%M%S")
+        end_time = (now + timedelta(minutes=5)).strftime("%Y%m%d%H%M%S")
+
+        cameras = api.get_road_cameras(road_id, start_time, end_time)
+
+        camera_list = []
+        for cam in cameras:
+            camera_list.append({
+                'channel_num': cam.channel_num,
+                'camera_type': cam.camera_type,
+                'camera_type_str': cam.camera_type_str,
+                'is_panoramic': cam.is_panoramic
+            })
+
+        return jsonify({
+            'success': True,
+            'road_id': road_id,
+            'cameras': camera_list,
+            'total': len(camera_list)
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/start', methods=['POST'])
+def start_history_analysis():
+    """启动历史视频批量分析任务"""
+    try:
+        data = request.get_json()
+
+        road_id = data.get('road_id')
+        channel_num = data.get('channel_num')  # 或 device_id
+        date = data.get('date')
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        mode = data.get('mode', 'accident')
+        model = data.get('model', 'qwen-vl-plus')
+        violation_types = data.get('violation_types', [])
+        segment_duration = data.get('segment_duration', 300)
+
+        # 验证必要参数
+        if not all([road_id, channel_num, date, start_time, end_time]):
+            return jsonify({
+                'success': False,
+                'error': '缺少必要参数：road_id, channel_num, date, start_time, end_time'
+            }), 400
+
+        processor = get_history_processor()
+
+        # 创建任务
+        task = processor.create_task(
+            road_id=road_id,
+            channel_num=channel_num,
+            date=date,
+            start_time=start_time,
+            end_time=end_time,
+            mode=mode,
+            model=model,
+            violation_types=violation_types,
+            segment_duration=segment_duration
+        )
+
+        # 创建SSE队列
+        _history_sse_queues[task.task_id] = Queue()
+
+        # 在后台线程启动任务
+        def run_task():
+            processor.start_task(task.task_id)
+
+        thread = threading.Thread(target=run_task)
+        thread.daemon = True
+        thread.start()
+
+        # 计算预估时间
+        total_minutes = (len(task.segments) * 5)  # 每段约5分钟
+        estimated_duration = f"约{total_minutes}分钟"
+
+        return jsonify({
+            'success': True,
+            'task_id': task.task_id,
+            'total_segments': len(task.segments),
+            'mode': mode,
+            'model': model,
+            'segment_duration': segment_duration,
+            'estimated_duration': estimated_duration
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/stop/<task_id>', methods=['POST'])
+def stop_history_analysis(task_id):
+    """停止历史视频分析任务"""
+    try:
+        processor = get_history_processor()
+        processor.stop_task(task_id)
+
+        return jsonify({
+            'success': True,
+            'message': f'任务 {task_id} 已停止'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/progress/<task_id>')
+def history_progress(task_id):
+    """SSE进度流"""
+    def generate():
+        # 确保队列存在
+        if task_id not in _history_sse_queues:
+            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'})}\n\n"
+            return
+
+        q = _history_sse_queues[task_id]
+
+        # 发送初始连接消息
+        yield f"event: connected\ndata: {json.dumps({'task_id': task_id})}\n\n"
+
+        try:
+            while True:
+                try:
+                    # 增加超时时间到30秒，容忍下载连接建立等慢操作
+                    item = q.get(timeout=30)
+                    event_type = item.get('event', 'message')
+                    data = item.get('data', {})
+
+                    yield f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                    # 如果是完成事件，结束流
+                    if event_type == 'complete':
+                        break
+
+                except Empty:
+                    # 发送心跳
+                    yield f": heartbeat\n\n"
+                    continue
+
+        except GeneratorExit:
+            pass
+        finally:
+            # 清理队列
+            if task_id in _history_sse_queues:
+                del _history_sse_queues[task_id]
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive'
+        }
+    )
+
+
+@app.route('/api/history/retry/<task_id>/<int:segment_index>', methods=['POST'])
+def retry_segment(task_id, segment_index):
+    """重试失败的片段"""
+    try:
+        processor = get_history_processor()
+        success = processor.retry_segment(task_id, segment_index)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'片段#{segment_index} 已加入重试队列'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '重试失败，任务或片段不存在'
+            }), 400
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/skip/<task_id>/<int:segment_index>', methods=['POST'])
+def skip_segment(task_id, segment_index):
+    """跳过失败的片段"""
+    try:
+        processor = get_history_processor()
+        success = processor.skip_segment(task_id, segment_index)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'片段#{segment_index} 已标记为跳过'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '跳过失败，任务或片段不存在'
+            }), 400
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/report/<task_id>')
+def get_history_report(task_id):
+    """获取分析报告"""
+    try:
+        config = HistoryProcessConfig()
+        report_path = os.path.join(config.result_dir, task_id, 'report.html')
+
+        if os.path.exists(report_path):
+            return send_file(report_path, mimetype='text/html')
+        else:
+            return jsonify({
+                'success': False,
+                'error': '报告不存在'
+            }), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/download/<task_id>/<int:segment_index>')
+def download_evidence(task_id, segment_index):
+    """下载证据包"""
+    try:
+        config = HistoryProcessConfig()
+        segment_dir = os.path.join(config.result_dir, task_id, f'segment_{segment_index:03d}')
+
+        if not os.path.exists(segment_dir):
+            return jsonify({
+                'success': False,
+                'error': '证据不存在'
+            }), 404
+
+        # 创建ZIP压缩包
+        zip_filename = f'{task_id}_segment_{segment_index}.zip'
+        zip_path = os.path.join(config.temp_dir, zip_filename)
+
+        shutil.make_archive(zip_path.replace('.zip', ''), 'zip', segment_dir)
+
+        return send_file(zip_path, as_attachment=True, download_name=zip_filename)
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/thumbnail/<task_id>/<int:segment_index>')
+def get_thumbnail(task_id, segment_index):
+    """获取片段缩略图"""
+    try:
+        config = HistoryProcessConfig()
+        keyframes_dir = os.path.join(config.result_dir, task_id, f'segment_{segment_index:03d}', 'keyframes')
+
+        # 尝试获取第一张关键帧作为缩略图
+        if os.path.exists(keyframes_dir):
+            frames = os.listdir(keyframes_dir)
+            if frames:
+                first_frame = os.path.join(keyframes_dir, sorted(frames)[0])
+                return send_file(first_frame, mimetype='image/jpeg')
+
+        # 如果没有关键帧，返回默认图片
+        return jsonify({
+            'success': False,
+            'error': '缩略图不存在'
+        }), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/history/status/<task_id>')
+def get_task_status(task_id):
+    """获取任务状态"""
+    try:
+        processor = get_history_processor()
+        status = processor.get_task_status(task_id)
+
+        if status:
+            return jsonify({
+                'success': True,
+                **status
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '任务不存在'
+            }), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     print("=" * 60)

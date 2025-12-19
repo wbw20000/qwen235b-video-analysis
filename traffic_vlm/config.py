@@ -26,7 +26,7 @@ class EmbeddingConfig:
 
     model_name: str = "google/siglip-base-patch16-384"
     device: str = "auto"
-    batch_size: int = 8
+    batch_size: int = 16  # 优化：从8改为16，加速SigLIP嵌入计算
     top_m_per_template: int = 80
     frame_top_n: int = 80
     candidate_clip_top_k: int = 12
@@ -223,6 +223,44 @@ class TemplateConfig:
 
 
 @dataclass
+class TsingcloudConfig:
+    """云控智行API配置"""
+
+    app_key: str = ""          # 从环境变量 TSINGCLOUD_APP_KEY 读取
+    password: str = ""         # 从环境变量 TSINGCLOUD_PASSWORD 读取
+    base_url: str = "https://rc.ccg.bcavt.com:8760/infraCloud"
+    request_interval: float = 1.0    # 请求间隔（秒），防止限流
+    poll_interval: float = 30.0      # URL轮询间隔（秒）
+    poll_timeout: float = 300.0      # URL轮询超时（秒）
+    verify_ssl: bool = False         # 是否验证SSL证书
+
+    def __post_init__(self):
+        # 尝试从环境变量读取凭据
+        if not self.app_key:
+            self.app_key = os.environ.get("TSINGCLOUD_APP_KEY", "")
+        if not self.password:
+            self.password = os.environ.get("TSINGCLOUD_PASSWORD", "")
+
+
+@dataclass
+class HistoryProcessConfig:
+    """历史视频处理配置"""
+
+    segment_duration: int = 300          # 分片时长（秒），默认5分钟
+    download_retry_count: int = 3        # 下载重试次数
+    download_retry_interval: float = 30.0  # 重试间隔（秒）
+    analyze_timeout: float = 300.0       # 分析超时（秒）
+    max_buffer_segments: int = 2         # 最大缓冲片段数
+    temp_dir: str = "temp/history"       # 临时目录
+    result_dir: str = "data/history_analysis"  # 结果目录
+    cleanup_on_no_event: bool = True     # 无事故/违法时删除
+
+    def ensure_dirs(self):
+        os.makedirs(self.temp_dir, exist_ok=True)
+        os.makedirs(self.result_dir, exist_ok=True)
+
+
+@dataclass
 class TrafficVLMConfig:
     """整体配置聚合。"""
 
@@ -233,8 +271,11 @@ class TrafficVLMConfig:
     vlm: VLMConfig = field(default_factory=VLMConfig)
     datastore: DataStoreConfig = field(default_factory=DataStoreConfig)
     templates: TemplateConfig = field(default_factory=TemplateConfig)
+    tsingcloud: TsingcloudConfig = field(default_factory=TsingcloudConfig)
+    history: HistoryProcessConfig = field(default_factory=HistoryProcessConfig)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()
+        self.history.ensure_dirs()
         # 预建主数据目录
         os.makedirs(self.datastore.base_dir, exist_ok=True)
