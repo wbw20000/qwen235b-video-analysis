@@ -167,6 +167,37 @@
         .form-group select:disabled {
             background: var(--bg-card);
             color: var(--text-muted);
+        }
+
+        /* 跨日期时间选择样式 */
+        .datetime-row {
+            align-items: flex-start;
+        }
+
+        .datetime-group {
+            flex: 1;
+            min-width: 280px;
+        }
+
+        .datetime-inputs {
+            display: flex;
+            gap: 10px;
+        }
+
+        .datetime-inputs input[type="date"] {
+            flex: 1.2;
+        }
+
+        .datetime-inputs input[type="time"] {
+            flex: 0.8;
+        }
+
+        .datetime-hint {
+            display: block;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-top: -10px;
+            margin-bottom: 15px;
             cursor: not-allowed;
         }
 
@@ -180,6 +211,220 @@
         .form-group select option {
             background: var(--bg-card);
             color: var(--text-primary);
+        }
+
+        /* 遍历模式选择 */
+        .traverse-mode-section {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .traverse-mode-cards {
+            display: flex;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .traverse-mode-card {
+            flex: 1;
+            padding: 15px;
+            background: var(--bg-dark);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .traverse-mode-card:hover {
+            border-color: var(--accent-cyan);
+            background: var(--bg-card-hover);
+        }
+
+        .traverse-mode-card.active {
+            border-color: var(--accent-cyan);
+            background: rgba(72, 202, 228, 0.1);
+            box-shadow: 0 0 15px rgba(72, 202, 228, 0.2);
+        }
+
+        .traverse-mode-card input[type="radio"] {
+            display: none;
+        }
+
+        .traverse-mode-card .mode-icon {
+            font-size: 1.8em;
+            margin-bottom: 6px;
+        }
+
+        .traverse-mode-card .mode-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.95em;
+        }
+
+        .traverse-mode-card .mode-desc {
+            font-size: 0.75em;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* 路口多选区域 */
+        .road-multiselect-container {
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .road-multiselect-container.show {
+            display: block;
+        }
+
+        .road-checkbox-item {
+            display: inline-block;
+            width: 48%;
+            padding: 6px 10px;
+            margin: 2px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .road-checkbox-item:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .road-checkbox-item input {
+            margin-right: 6px;
+        }
+
+        .road-select-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .road-select-actions button {
+            padding: 4px 12px;
+            font-size: 0.8em;
+            background: var(--bg-card-hover);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .road-select-actions button:hover {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        /* 批量进度区域 */
+        .batch-progress-section {
+            display: none;
+            background: var(--bg-card-hover);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+        }
+
+        .batch-progress-section.show {
+            display: block;
+        }
+
+        .batch-stats {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .batch-stat-card {
+            background: var(--bg-dark);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .batch-stat-card .value {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+
+        .batch-stat-card .label {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+
+        .batch-stat-card.events .value {
+            color: var(--accent-orange);
+        }
+
+        /* 路口进度表 */
+        .road-progress-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .road-progress-table th,
+        .road-progress-table td {
+            padding: 10px;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+
+        .road-progress-table th {
+            background: var(--bg-dark);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .road-progress-table tr:hover {
+            background: rgba(72, 202, 228, 0.05);
+        }
+
+        .road-progress-table .status-pending { color: var(--text-muted); }
+        .road-progress-table .status-running { color: var(--accent-blue); }
+        .road-progress-table .status-completed { color: var(--accent-green); }
+        .road-progress-table .status-skipped { color: var(--accent-orange); }
+        .road-progress-table .status-failed { color: var(--accent-red); }
+
+        .road-progress-container {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        /* 当前路口详情 */
+        .current-road-detail {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .current-road-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .current-road-title {
+            font-weight: 600;
+            color: var(--accent-cyan);
         }
 
         /* 分析策略选择 */
@@ -770,6 +1015,33 @@
             <div class="section-title">任务配置</div>
 
             <form id="historyForm">
+                <!-- 遍历模式选择 -->
+                <div class="traverse-mode-section">
+                    <div class="section-title">遍历模式</div>
+                    <div class="traverse-mode-cards">
+                        <label class="traverse-mode-card active" id="singleModeCard">
+                            <input type="radio" name="traverse_mode" value="single" checked>
+                            <div class="mode-icon">📍</div>
+                            <div class="mode-title">单点分析</div>
+                            <div class="mode-desc">指定路口+摄像头</div>
+                        </label>
+                        <label class="traverse-mode-card" id="roadModeCard">
+                            <input type="radio" name="traverse_mode" value="road_traverse">
+                            <div class="mode-icon">🛣️</div>
+                            <div class="mode-title">路口遍历</div>
+                            <div class="mode-desc">遍历所选路口的全景摄像头</div>
+                        </label>
+                        <label class="traverse-mode-card" id="timeModeCard">
+                            <input type="radio" name="traverse_mode" value="time_traverse">
+                            <div class="mode-icon">⏰</div>
+                            <div class="mode-title">时间遍历</div>
+                            <div class="mode-desc">遍历全部路口的全景摄像头</div>
+                        </label>
+                    </div>
+                    <div id="traverseModeHint" style="margin-top: 10px; padding: 10px; background: rgba(72, 202, 228, 0.1); border-radius: 6px; font-size: 0.85em; color: var(--accent-cyan); display: none;">
+                    </div>
+                </div>
+
                 <!-- VLM模型选择 -->
                 <div class="form-row">
                     <div class="form-group">
@@ -788,8 +1060,8 @@
                     </div>
                 </div>
 
-                <!-- 路口-摄像头级联选择 -->
-                <div class="form-row">
+                <!-- 路口-摄像头级联选择（单点模式） -->
+                <div class="form-row" id="singleSelectRow">
                     <div class="form-group">
                         <label for="roadSelect">选择路口:</label>
                         <select id="roadSelect" name="road_id">
@@ -797,7 +1069,7 @@
                         </select>
                         <small>选择要回溯的路口</small>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" id="cameraSelectGroup">
                         <label for="cameraSelect">选择摄像头:</label>
                         <select id="cameraSelect" name="channel_num" disabled>
                             <option value="">-- 请先选择路口 --</option>
@@ -806,22 +1078,39 @@
                     </div>
                 </div>
 
-                <!-- 日期时间选择 -->
-                <div class="form-row">
+                <!-- 路口多选（路口遍历模式） -->
+                <div id="roadMultiselectSection" style="display: none;">
                     <div class="form-group">
-                        <label for="dateInput">选择日期:</label>
-                        <input type="date" id="dateInput" name="date" required>
-                        <small>历史视频保留14天</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="startTime">开始时间:</label>
-                        <input type="time" id="startTime" name="start_time" value="09:00" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="endTime">结束时间:</label>
-                        <input type="time" id="endTime" name="end_time" value="11:00" required>
+                        <label>选择路口（可多选）:</label>
+                        <div class="road-select-actions">
+                            <button type="button" onclick="selectAllRoads()">全选</button>
+                            <button type="button" onclick="deselectAllRoads()">取消全选</button>
+                            <span id="selectedRoadCount" style="color: var(--text-muted); margin-left: 10px;">已选: 0</span>
+                        </div>
+                        <div class="road-multiselect-container show" id="roadMultiselect">
+                            <!-- 动态填充 -->
+                        </div>
                     </div>
                 </div>
+
+                <!-- 日期时间选择（支持跨日期） -->
+                <div class="form-row datetime-row">
+                    <div class="form-group datetime-group">
+                        <label>开始时间:</label>
+                        <div class="datetime-inputs">
+                            <input type="date" id="startDateInput" name="start_date" required>
+                            <input type="time" id="startTimeInput" name="start_time" value="00:00" required>
+                        </div>
+                    </div>
+                    <div class="form-group datetime-group">
+                        <label>结束时间:</label>
+                        <div class="datetime-inputs">
+                            <input type="date" id="endDateInput" name="end_date" required>
+                            <input type="time" id="endTimeInput" name="end_time" value="23:59" required>
+                        </div>
+                    </div>
+                </div>
+                <small class="datetime-hint">历史视频保留14天，可选择跨日期时间段</small>
 
                 <!-- 分析策略选择 -->
                 <div class="section-title" style="margin-top: 20px;">分析策略</div>
@@ -888,6 +1177,74 @@
 
             <!-- 错误提示 -->
             <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <!-- 批量进度区域（遍历模式显示） -->
+        <div class="batch-progress-section" id="batchProgressSection">
+            <div class="section-title">📊 批量遍历进度</div>
+
+            <!-- 批量统计 -->
+            <div class="batch-stats">
+                <div class="batch-stat-card">
+                    <div class="value" id="batchTotalRoads">0</div>
+                    <div class="label">总路口数</div>
+                </div>
+                <div class="batch-stat-card">
+                    <div class="value" id="batchCompletedRoads">0</div>
+                    <div class="label">已完成</div>
+                </div>
+                <div class="batch-stat-card">
+                    <div class="value" id="batchSkippedRoads">0</div>
+                    <div class="label">已跳过</div>
+                </div>
+                <div class="batch-stat-card">
+                    <div class="value" id="batchTotalCameras">0</div>
+                    <div class="label">摄像头数</div>
+                </div>
+                <div class="batch-stat-card events">
+                    <div class="value" id="batchEventsFound">0</div>
+                    <div class="label">检出事件</div>
+                </div>
+            </div>
+
+            <!-- 总进度条 -->
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="batchProgressBar" style="width: 0%;">0%</div>
+            </div>
+
+            <!-- 路口进度表 -->
+            <div class="road-progress-container">
+                <table class="road-progress-table">
+                    <thead>
+                        <tr>
+                            <th>路口ID</th>
+                            <th>路口名称</th>
+                            <th>摄像头数</th>
+                            <th>状态</th>
+                            <th>检出</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="roadProgressTableBody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                                等待启动批量任务...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 当前路口详情 -->
+            <div class="current-road-detail" id="currentRoadDetail" style="display: none;">
+                <div class="current-road-header">
+                    <span class="current-road-title">当前路口: <span id="currentRoadId">-</span></span>
+                    <span id="currentRoadProgress">-</span>
+                </div>
+                <div id="currentRoadSegments">
+                    <!-- 复用现有的片段表格 -->
+                </div>
+            </div>
         </div>
 
         <!-- 区域B: 任务队列状态 -->
@@ -995,11 +1352,16 @@
     <script>
         // 全局状态
         let currentTaskId = null;
+        let currentBatchId = null;
         let eventSource = null;
+        let batchEventSource = null;
         let isRunning = false;
+        let isBatchMode = false;
         let downloadLogs = [];  // 下载日志
         let analyzeLogs = [];   // 分析日志
         let segments = [];
+        let allRoads = [];  // 所有路口数据
+        let batchRoads = [];  // 批量任务的路口列表
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 10;
         let reconnectTimer = null;
@@ -1008,27 +1370,61 @@
         const historyForm = document.getElementById('historyForm');
         const roadSelect = document.getElementById('roadSelect');
         const cameraSelect = document.getElementById('cameraSelect');
-        const dateInput = document.getElementById('dateInput');
+        const startDateInput = document.getElementById('startDateInput');
+        const startTimeInput = document.getElementById('startTimeInput');
+        const endDateInput = document.getElementById('endDateInput');
+        const endTimeInput = document.getElementById('endTimeInput');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const progressSection = document.getElementById('progressSection');
         const resultsSection = document.getElementById('resultsSection');
         const errorMessage = document.getElementById('errorMessage');
+        const batchProgressSection = document.getElementById('batchProgressSection');
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
-            // 设置默认日期为今天
+            // 设置日期范围限制
             const today = new Date();
-            dateInput.value = today.toISOString().split('T')[0];
-            dateInput.max = today.toISOString().split('T')[0];
+            const todayStr = today.toISOString().split('T')[0];
 
-            // 设置最小日期（14天前）
+            // 最小日期（14天前）
             const minDate = new Date();
             minDate.setDate(minDate.getDate() - 14);
-            dateInput.min = minDate.toISOString().split('T')[0];
+            const minDateStr = minDate.toISOString().split('T')[0];
+
+            // 昨天（默认开始日期）
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+            // 设置开始日期：默认昨天，范围14天前到今天
+            startDateInput.value = yesterdayStr;
+            startDateInput.min = minDateStr;
+            startDateInput.max = todayStr;
+
+            // 设置结束日期：默认今天，范围14天前到今天
+            endDateInput.value = todayStr;
+            endDateInput.min = minDateStr;
+            endDateInput.max = todayStr;
+
+            // 添加日期变化验证
+            startDateInput.addEventListener('change', validateDateTimeRange);
+            endDateInput.addEventListener('change', validateDateTimeRange);
+            startTimeInput.addEventListener('change', validateDateTimeRange);
+            endTimeInput.addEventListener('change', validateDateTimeRange);
 
             // 加载路口列表
             loadRoads();
+
+            // 绑定遍历模式卡片点击
+            document.querySelectorAll('.traverse-mode-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    document.querySelectorAll('.traverse-mode-card').forEach(c => c.classList.remove('active'));
+                    this.classList.add('active');
+                    this.querySelector('input[type="radio"]').checked = true;
+                    onTraverseModeChange(this.querySelector('input').value);
+                });
+            });
 
             // 绑定策略卡片点击
             document.querySelectorAll('.strategy-card').forEach(card => {
@@ -1057,17 +1453,97 @@
                 roadSelect.innerHTML = '<option value="">-- 选择路口 --</option>';
 
                 if (data.roads && data.roads.length > 0) {
+                    allRoads = data.roads;  // 保存到全局变量
                     data.roads.forEach(road => {
                         const option = document.createElement('option');
                         option.value = road.road_id;
                         option.textContent = `${road.road_id} - ${road.road_name || '路口' + road.road_id}`;
                         roadSelect.appendChild(option);
                     });
+
+                    // 填充多选容器
+                    fillRoadMultiselect(data.roads);
                 }
             } catch (err) {
                 console.error('加载路口列表失败:', err);
                 showError('加载路口列表失败，请刷新页面重试');
             }
+        }
+
+        // 填充路口多选容器
+        function fillRoadMultiselect(roads) {
+            const container = document.getElementById('roadMultiselect');
+            container.innerHTML = '';
+
+            roads.forEach(road => {
+                const label = document.createElement('label');
+                label.className = 'road-checkbox-item';
+                label.innerHTML = `
+                    <input type="checkbox" name="road_checkbox" value="${road.road_id}" onchange="updateSelectedRoadCount()">
+                    ${road.road_id} - ${road.road_name || '路口' + road.road_id}
+                `;
+                container.appendChild(label);
+            });
+        }
+
+        // 遍历模式切换
+        function onTraverseModeChange(mode) {
+            const singleSelectRow = document.getElementById('singleSelectRow');
+            const cameraSelectGroup = document.getElementById('cameraSelectGroup');
+            const roadMultiselectSection = document.getElementById('roadMultiselectSection');
+            const traverseModeHint = document.getElementById('traverseModeHint');
+
+            isBatchMode = (mode !== 'single');
+
+            if (mode === 'single') {
+                // 单点分析模式
+                singleSelectRow.style.display = 'flex';
+                cameraSelectGroup.style.display = 'block';
+                roadMultiselectSection.style.display = 'none';
+                traverseModeHint.style.display = 'none';
+                startBtn.textContent = '🚀 开始并行分析任务';
+            } else if (mode === 'road_traverse') {
+                // 路口遍历模式
+                singleSelectRow.style.display = 'none';
+                roadMultiselectSection.style.display = 'block';
+                traverseModeHint.style.display = 'block';
+                traverseModeHint.innerHTML = '🛣️ <strong>路口遍历模式</strong>：系统将遍历所选路口的所有全景摄像头进行分析';
+                startBtn.textContent = '🚀 开始批量遍历分析';
+            } else if (mode === 'time_traverse') {
+                // 时间遍历模式
+                singleSelectRow.style.display = 'none';
+                roadMultiselectSection.style.display = 'none';
+                traverseModeHint.style.display = 'block';
+                traverseModeHint.innerHTML = `⏰ <strong>时间遍历模式</strong>：系统将遍历全部 ${allRoads.length} 个路口的所有全景摄像头进行分析`;
+                startBtn.textContent = '🚀 开始全量遍历分析';
+            }
+        }
+
+        // 全选路口
+        function selectAllRoads() {
+            document.querySelectorAll('input[name="road_checkbox"]').forEach(cb => cb.checked = true);
+            updateSelectedRoadCount();
+        }
+
+        // 取消全选路口
+        function deselectAllRoads() {
+            document.querySelectorAll('input[name="road_checkbox"]').forEach(cb => cb.checked = false);
+            updateSelectedRoadCount();
+        }
+
+        // 更新已选路口计数
+        function updateSelectedRoadCount() {
+            const count = document.querySelectorAll('input[name="road_checkbox"]:checked').length;
+            document.getElementById('selectedRoadCount').textContent = `已选: ${count}`;
+        }
+
+        // 获取选中的路口ID列表
+        function getSelectedRoadIds() {
+            const selected = [];
+            document.querySelectorAll('input[name="road_checkbox"]:checked').forEach(cb => {
+                selected.push(cb.value);
+            });
+            return selected;
         }
 
         // 路口选择变化时加载摄像头
@@ -1082,10 +1558,10 @@
             }
 
             try {
-                // 获取日期和时间（用于API调用）
-                const date = dateInput.value || new Date().toISOString().split('T')[0];
-                const startTime = document.getElementById('startTime').value || '09:00';
-                const endTime = document.getElementById('endTime').value || '09:05';
+                // 获取日期和时间（用于API调用，使用开始日期）
+                const date = startDateInput.value || new Date().toISOString().split('T')[0];
+                const startTime = startTimeInput.value || '00:00';
+                const endTime = endTimeInput.value || '23:59';
 
                 const response = await fetch(`/api/history/cameras/${roadId}?date=${date}&start_time=${startTime}&end_time=${endTime}`);
                 const data = await response.json();
@@ -1127,32 +1603,40 @@
         historyForm.addEventListener('submit', async function(e) {
             e.preventDefault();
 
-            // 验证
-            const roadId = roadSelect.value;
-            const channelNum = cameraSelect.value;
-            const date = dateInput.value;
-            const startTime = document.getElementById('startTime').value;
-            const endTime = document.getElementById('endTime').value;
+            const startDate = startDateInput.value;
+            const startTime = startTimeInput.value;
+            const endDate = endDateInput.value;
+            const endTime = endTimeInput.value;
 
-            if (!roadId) {
-                showError('请选择路口');
-                return;
-            }
-            if (!channelNum) {
-                showError('请选择摄像头');
-                return;
-            }
-            if (!date) {
+            if (!startDate || !endDate) {
                 showError('请选择日期');
                 return;
             }
 
+            // 验证时间范围
+            const startDT = new Date(`${startDate}T${startTime}`);
+            const endDT = new Date(`${endDate}T${endTime}`);
+            if (endDT <= startDT) {
+                showError('结束时间必须大于开始时间');
+                return;
+            }
+
+            // 检查时间跨度不超过14天
+            const daysDiff = (endDT - startDT) / (1000 * 60 * 60 * 24);
+            if (daysDiff > 14) {
+                showError('时间跨度不能超过14天');
+                return;
+            }
+
+            // 获取遍历模式
+            const traverseMode = document.querySelector('input[name="traverse_mode"]:checked').value;
+
             // 获取分析模式
-            const mode = document.querySelector('input[name="mode"]:checked').value;
+            const analysisMode = document.querySelector('input[name="mode"]:checked').value;
 
             // 获取违法类型（如果是违法模式）
             let violationTypes = [];
-            if (mode === 'violation') {
+            if (analysisMode === 'violation') {
                 document.querySelectorAll('input[name="violation_type"]:checked').forEach(cb => {
                     violationTypes.push(cb.value);
                 });
@@ -1162,23 +1646,68 @@
                 }
             }
 
-            // 构建请求数据
-            const requestData = {
-                road_id: roadId,
-                channel_num: channelNum,
-                date: date,
-                start_time: startTime,
-                end_time: endTime,
-                mode: mode,
-                violation_types: violationTypes,
-                model: document.getElementById('model').value,
-                segment_duration: parseInt(document.getElementById('segmentDuration').value) * 60,
-                download_retry_count: parseInt(document.getElementById('downloadRetry').value),
-                analyze_timeout: parseInt(document.getElementById('analyzeTimeout').value)
-            };
+            if (traverseMode === 'single') {
+                // 单点分析模式
+                const roadId = roadSelect.value;
+                const channelNum = cameraSelect.value;
 
-            // 开始任务
-            await startTask(requestData);
+                if (!roadId) {
+                    showError('请选择路口');
+                    return;
+                }
+                if (!channelNum) {
+                    showError('请选择摄像头');
+                    return;
+                }
+
+                // 构建请求数据（支持跨日期）
+                const requestData = {
+                    road_id: roadId,
+                    channel_num: channelNum,
+                    start_date: startDate,
+                    start_time: startTime,
+                    end_date: endDate,
+                    end_time: endTime,
+                    mode: analysisMode,
+                    violation_types: violationTypes,
+                    model: document.getElementById('model').value,
+                    segment_duration: parseInt(document.getElementById('segmentDuration').value) * 60,
+                    download_retry_count: parseInt(document.getElementById('downloadRetry').value),
+                    analyze_timeout: parseInt(document.getElementById('analyzeTimeout').value)
+                };
+
+                // 开始单点任务
+                await startTask(requestData);
+
+            } else {
+                // 批量遍历模式
+                let roadIds = [];
+                if (traverseMode === 'road_traverse') {
+                    roadIds = getSelectedRoadIds();
+                    if (roadIds.length === 0) {
+                        showError('请至少选择一个路口');
+                        return;
+                    }
+                }
+                // time_traverse 模式 roadIds 为空，后端会遍历所有路口
+
+                // 构建批量请求数据（支持跨日期）
+                const batchRequestData = {
+                    mode: traverseMode,
+                    start_date: startDate,
+                    start_time: startTime,
+                    end_date: endDate,
+                    end_time: endTime,
+                    road_ids: roadIds,
+                    model: document.getElementById('model').value,
+                    analysis_mode: analysisMode,
+                    violation_types: violationTypes,
+                    segment_duration: parseInt(document.getElementById('segmentDuration').value) * 60
+                };
+
+                // 开始批量任务
+                await startBatchTask(batchRequestData);
+            }
         });
 
         // 开始任务
@@ -1241,6 +1770,262 @@
                 console.error('启动任务失败:', err);
                 showError('启动任务失败: ' + err.message);
                 resetUI();
+            }
+        }
+
+        // 开始批量任务
+        async function startBatchTask(requestData) {
+            try {
+                hideError();
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                isRunning = true;
+
+                // 隐藏单点进度区域，显示批量进度区域
+                progressSection.classList.remove('show');
+                batchProgressSection.classList.add('show');
+                resultsSection.classList.add('show');
+
+                // 清空之前的结果
+                document.getElementById('resultCards').innerHTML = '';
+                document.getElementById('roadProgressTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                            正在创建批量任务...
+                        </td>
+                    </tr>
+                `;
+                document.getElementById('processedCount').textContent = '0';
+                document.getElementById('detectedCount').textContent = '0';
+                document.getElementById('clearedCount').textContent = '0';
+
+                // 清空日志
+                downloadLogs = [];
+                analyzeLogs = [];
+
+                addLog('info', '正在创建批量遍历任务...');
+
+                const response = await fetch('/api/batch/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || '启动批量任务失败');
+                }
+
+                currentBatchId = data.batch_id;
+
+                // 更新统计信息
+                document.getElementById('batchTotalRoads').textContent = data.total_roads;
+                document.getElementById('batchCompletedRoads').textContent = '0';
+                document.getElementById('batchSkippedRoads').textContent = '0';
+                document.getElementById('batchTotalCameras').textContent = '-';
+                document.getElementById('batchEventsFound').textContent = '0';
+
+                addLog('success', `批量任务已启动 (ID: ${currentBatchId}), 共 ${data.total_roads} 个路口`);
+
+                // 建立批量SSE连接
+                connectBatchSSE(currentBatchId);
+
+            } catch (err) {
+                console.error('启动批量任务失败:', err);
+                showError('启动批量任务失败: ' + err.message);
+                resetUI();
+            }
+        }
+
+        // 批量SSE连接
+        function connectBatchSSE(batchId) {
+            if (batchEventSource) {
+                batchEventSource.close();
+            }
+
+            batchEventSource = new EventSource(`/api/batch/progress/${batchId}`);
+
+            // 初始化状态
+            batchEventSource.addEventListener('init', function(e) {
+                const data = JSON.parse(e.data);
+                updateBatchRoadTable(data.roads || []);
+                batchRoads = data.roads || [];
+            });
+
+            // 批量进度更新
+            batchEventSource.addEventListener('batch_progress', function(e) {
+                const data = JSON.parse(e.data);
+                document.getElementById('batchCompletedRoads').textContent = data.completed_roads;
+                document.getElementById('batchSkippedRoads').textContent = data.skipped_roads;
+                document.getElementById('batchEventsFound').textContent = data.total_events_found;
+
+                // 更新进度条
+                const percent = Math.round((data.completed_roads + data.skipped_roads) / data.total_roads * 100);
+                const progressBar = document.getElementById('batchProgressBar');
+                progressBar.style.width = percent + '%';
+                progressBar.textContent = percent + '%';
+            });
+
+            // 路口开始
+            batchEventSource.addEventListener('road_start', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('info', `开始处理路口 ${data.road_id} (${data.road_index + 1}/${data.total_roads})`, 'download');
+                updateRoadRowStatus(data.road_id, 'running', data.camera_count);
+            });
+
+            // 路口完成
+            batchEventSource.addEventListener('road_complete', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('success', `路口 ${data.road_id} 完成，检出 ${data.events_found} 起`, 'download');
+                updateRoadRowStatus(data.road_id, 'completed', data.total_cameras, data.events_found);
+            });
+
+            // 路口跳过
+            batchEventSource.addEventListener('road_skipped', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('warning', `路口 ${data.road_id} 跳过: ${data.reason}`, 'download');
+                updateRoadRowStatus(data.road_id, 'skipped', 0, 0, data.reason);
+            });
+
+            // 摄像头开始
+            batchEventSource.addEventListener('camera_start', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('info', `开始处理摄像头 ${data.channel_num}`, 'analyze');
+            });
+
+            // 摄像头完成
+            batchEventSource.addEventListener('camera_complete', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('success', `摄像头 ${data.channel_num} 完成，检出 ${data.events_found} 起`, 'analyze');
+            });
+
+            // 日志事件
+            batchEventSource.addEventListener('log', function(e) {
+                const data = JSON.parse(e.data);
+                addLog(data.level, data.message, data.category || 'general');
+            });
+
+            // 结果事件
+            batchEventSource.addEventListener('result', function(e) {
+                const data = JSON.parse(e.data);
+                addResultCard(data);
+                showToast(`检测到${data.event_type}！(路口 ${data.road_id})`, 'warning');
+                updateResultStats();
+            });
+
+            // 批量完成
+            batchEventSource.addEventListener('batch_complete', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('success', `批量任务完成！完成 ${data.completed_roads} 个路口，跳过 ${data.skipped_roads} 个，检出 ${data.total_events_found} 起事件`);
+
+                // 更新最终统计
+                document.getElementById('batchCompletedRoads').textContent = data.completed_roads;
+                document.getElementById('batchSkippedRoads').textContent = data.skipped_roads;
+                document.getElementById('batchEventsFound').textContent = data.total_events_found;
+
+                // 进度条100%
+                const progressBar = document.getElementById('batchProgressBar');
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+
+                // 显示下载报告按钮
+                if (data.report_url) {
+                    const downloadBtn = document.getElementById('downloadReportBtn');
+                    downloadBtn.style.display = 'inline-block';
+                    downloadBtn.onclick = () => window.open(data.report_url, '_blank');
+                }
+
+                showToast('批量任务完成！', 'success');
+                resetUI();
+
+                if (batchEventSource) {
+                    batchEventSource.close();
+                    batchEventSource = null;
+                }
+            });
+
+            // 批量错误
+            batchEventSource.addEventListener('batch_error', function(e) {
+                const data = JSON.parse(e.data);
+                addLog('error', `批量任务出错: ${data.error}`);
+                showError('批量任务出错: ' + data.error);
+                resetUI();
+
+                if (batchEventSource) {
+                    batchEventSource.close();
+                    batchEventSource = null;
+                }
+            });
+
+            // SSE错误
+            batchEventSource.onerror = function(err) {
+                console.error('批量SSE连接错误:', err);
+                // 尝试重连逻辑类似单点模式
+            };
+        }
+
+        // 更新批量路口表格
+        function updateBatchRoadTable(roads) {
+            const tbody = document.getElementById('roadProgressTableBody');
+            tbody.innerHTML = '';
+
+            roads.forEach(road => {
+                const tr = document.createElement('tr');
+                tr.id = `road-row-${road.road_id}`;
+                tr.innerHTML = `
+                    <td>${road.road_id}</td>
+                    <td>${road.road_name}</td>
+                    <td>${road.total_cameras || '-'}</td>
+                    <td class="status-${road.status}">${getStatusText(road.status)}</td>
+                    <td>${road.events_found || 0}</td>
+                    <td>
+                        ${road.status === 'pending' ? `<button class="btn btn-secondary btn-small" onclick="skipRoad('${road.road_id}')">跳过</button>` : '-'}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 更新路口行状态
+        function updateRoadRowStatus(roadId, status, cameraCount, eventsFound, errorMsg) {
+            const row = document.getElementById(`road-row-${roadId}`);
+            if (row) {
+                const cells = row.querySelectorAll('td');
+                if (cameraCount !== undefined) cells[2].textContent = cameraCount;
+                cells[3].className = `status-${status}`;
+                cells[3].textContent = getStatusText(status);
+                if (eventsFound !== undefined) cells[4].textContent = eventsFound;
+                if (status !== 'pending') cells[5].textContent = errorMsg || '-';
+            }
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': '等待中',
+                'running': '处理中...',
+                'completed': '已完成',
+                'skipped': '已跳过',
+                'failed': '失败'
+            };
+            return statusMap[status] || status;
+        }
+
+        // 跳过路口
+        async function skipRoad(roadId) {
+            if (!currentBatchId) return;
+
+            try {
+                const response = await fetch(`/api/batch/skip/${currentBatchId}/${roadId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`路口 ${roadId} 已跳过`, 'info');
+                }
+            } catch (err) {
+                console.error('跳过路口失败:', err);
             }
         }
 
@@ -1344,8 +2129,36 @@
             };
         }
 
-        // 停止任务
+        // 停止任务（支持单点任务和批量任务）
         stopBtn.addEventListener('click', async function() {
+            // 检查是否有批量任务正在运行
+            if (currentBatchId) {
+                try {
+                    const response = await fetch(`/api/batch/stop/${currentBatchId}`, {
+                        method: 'POST'
+                    });
+                    const data = await response.json();
+
+                    addLog('warning', '批量任务已停止');
+                    showToast('批量任务已停止', 'warning');
+
+                    // 关闭批量SSE连接
+                    if (batchEventSource) {
+                        batchEventSource.close();
+                        batchEventSource = null;
+                    }
+
+                    // 重置批量任务状态
+                    currentBatchId = null;
+                    resetUI();
+                } catch (err) {
+                    console.error('停止批量任务失败:', err);
+                    addLog('error', '停止批量任务失败: ' + err.message);
+                }
+                return;
+            }
+
+            // 单点任务停止
             if (!currentTaskId) return;
 
             try {
@@ -1600,6 +2413,50 @@
                 toast.style.opacity = '0';
                 setTimeout(() => toast.remove(), 300);
             }, 3000);
+        }
+
+        // 验证日期时间范围
+        function validateDateTimeRange() {
+            const startDate = startDateInput.value;
+            const startTime = startTimeInput.value;
+            const endDate = endDateInput.value;
+            const endTime = endTimeInput.value;
+
+            if (!startDate || !endDate) return;
+
+            const startDT = new Date(`${startDate}T${startTime}`);
+            const endDT = new Date(`${endDate}T${endTime}`);
+
+            // 如果结束时间早于开始时间，自动调整结束日期
+            if (endDT <= startDT) {
+                // 如果是同一天，将结束时间调整为比开始时间晚1小时
+                if (startDate === endDate) {
+                    const newEndTime = new Date(startDT.getTime() + 60 * 60 * 1000);
+                    if (newEndTime.getDate() === startDT.getDate()) {
+                        endTimeInput.value = newEndTime.toTimeString().slice(0, 5);
+                    } else {
+                        // 跨天，设置结束日期为第二天
+                        const nextDay = new Date(startDT);
+                        nextDay.setDate(nextDay.getDate() + 1);
+                        endDateInput.value = nextDay.toISOString().split('T')[0];
+                        endTimeInput.value = startTime;
+                    }
+                }
+            }
+
+            // 检查时间跨度
+            const daysDiff = (new Date(`${endDateInput.value}T${endTimeInput.value}`) -
+                              new Date(`${startDate}T${startTime}`)) / (1000 * 60 * 60 * 24);
+
+            const hint = document.querySelector('.datetime-hint');
+            if (daysDiff > 14) {
+                hint.textContent = '⚠️ 时间跨度超过14天，请缩短时间范围';
+                hint.style.color = 'var(--accent-orange)';
+            } else {
+                const hours = Math.round(daysDiff * 24);
+                hint.textContent = `历史视频保留14天，当前选择时间段约 ${hours} 小时`;
+                hint.style.color = 'var(--text-muted)';
+            }
         }
 
         // 显示错误

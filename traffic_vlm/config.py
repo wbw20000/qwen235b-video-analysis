@@ -261,6 +261,26 @@ class HistoryProcessConfig:
 
 
 @dataclass
+class BatchProcessConfig:
+    """批量遍历处理配置"""
+
+    max_roads_per_batch: int = 500       # 单次最大路口数
+    max_cameras_per_road: int = 10       # 单路口最大摄像头数
+    camera_filter: str = "panoramic"     # 摄像头过滤: panoramic=只处理全景, all=全部
+    road_retry_count: int = 1            # 路口级别重试次数
+    camera_retry_count: int = 1          # 摄像头级别重试次数
+    skip_on_all_camera_fail: bool = True # 所有摄像头失败时跳过路口
+    concurrent_cameras: int = 1          # 同时处理的摄像头数（建议1，避免API限流）
+    batch_temp_dir: str = "temp/batch"   # 批量任务临时目录
+    batch_result_dir: str = "data/batch_reports"  # 批量任务结果目录
+    generate_summary_report: bool = True  # 生成汇总报告
+
+    def ensure_dirs(self):
+        os.makedirs(self.batch_temp_dir, exist_ok=True)
+        os.makedirs(self.batch_result_dir, exist_ok=True)
+
+
+@dataclass
 class TrafficVLMConfig:
     """整体配置聚合。"""
 
@@ -273,9 +293,11 @@ class TrafficVLMConfig:
     templates: TemplateConfig = field(default_factory=TemplateConfig)
     tsingcloud: TsingcloudConfig = field(default_factory=TsingcloudConfig)
     history: HistoryProcessConfig = field(default_factory=HistoryProcessConfig)
+    batch: BatchProcessConfig = field(default_factory=BatchProcessConfig)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()
         self.history.ensure_dirs()
+        self.batch.ensure_dirs()
         # 预建主数据目录
         os.makedirs(self.datastore.base_dir, exist_ok=True)

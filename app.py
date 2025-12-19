@@ -1868,14 +1868,16 @@ def get_cameras(road_id):
 
 @app.route('/api/history/start', methods=['POST'])
 def start_history_analysis():
-    """启动历史视频批量分析任务"""
+    """启动历史视频批量分析任务（支持跨日期时间段）"""
     try:
         data = request.get_json()
 
         road_id = data.get('road_id')
         channel_num = data.get('channel_num')  # 或 device_id
-        date = data.get('date')
+        # 支持新的跨日期格式
+        start_date = data.get('start_date') or data.get('date')  # 兼容旧格式
         start_time = data.get('start_time')
+        end_date = data.get('end_date') or data.get('date')  # 兼容旧格式
         end_time = data.get('end_time')
         mode = data.get('mode', 'accident')
         model = data.get('model', 'qwen-vl-plus')
@@ -1883,20 +1885,21 @@ def start_history_analysis():
         segment_duration = data.get('segment_duration', 300)
 
         # 验证必要参数
-        if not all([road_id, channel_num, date, start_time, end_time]):
+        if not all([road_id, channel_num, start_date, start_time, end_date, end_time]):
             return jsonify({
                 'success': False,
-                'error': '缺少必要参数：road_id, channel_num, date, start_time, end_time'
+                'error': '缺少必要参数：road_id, channel_num, start_date, start_time, end_date, end_time'
             }), 400
 
         processor = get_history_processor()
 
-        # 创建任务
+        # 创建任务（支持跨日期）
         task = processor.create_task(
             road_id=road_id,
             channel_num=channel_num,
-            date=date,
+            start_date=start_date,
             start_time=start_time,
+            end_date=end_date,
             end_time=end_time,
             mode=mode,
             model=model,
@@ -2128,6 +2131,304 @@ def get_task_status(task_id):
             return jsonify({
                 'success': False,
                 'error': '任务不存在'
+            }), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# 批量遍历分析 API
+# ============================================================
+
+from traffic_vlm.batch_processor import BatchVideoProcessor, BatchEventType
+
+# 批量处理器全局实例
+_batch_processor = None
+_batch_sse_queues = {}
+
+
+def get_batch_processor():
+    """获取批量视频处理器（单例）"""
+    global _batch_processor
+
+    if _batch_processor is None:
+        api = get_tsingcloud_api()
+        from traffic_vlm.config import BatchProcessConfig, HistoryProcessConfig
+
+        batch_config = BatchProcessConfig()
+        history_config = HistoryProcessConfig()
+
+        # 创建pipeline函数（调用TrafficVLMPipeline进行视频分析）
+        def pipeline_func(video_path, user_query, mode, model, progress_callback=None):
+            """调用视频分析pipeline"""
+            import traceback
+
+            def progress_cb(percent, message):
+                if progress_callback:
+                    progress_callback(percent, message)
+                print(f"[BatchPipeline] ({percent}%) {message}")
+
+            progress_cb(0, f"开始分析: {video_path}")
+
+            try:
+                from traffic_vlm.pipeline import TrafficVLMPipeline
+                from traffic_vlm.config import TrafficVLMConfig
+
+                progress_cb(1, "正在初始化 TrafficVLMPipeline...")
+                vlm_config = TrafficVLMConfig()
+                vlm_config.vlm.model = model
+
+                pipeline = TrafficVLMPipeline(config=vlm_config, progress_cb=progress_cb)
+                progress_cb(2, "Pipeline 初始化完成，开始分析...")
+
+                result = pipeline.run(video_path, user_query, mode=mode)
+                progress_cb(100, f"分析完成，结果数量: {len(result.get('results', []))}")
+
+                # 解析结果
+                has_event = False
+                event_type = None
+                confidence = 0.0
+
+                for item in result.get('results', []):
+                    vlm_out = item.get('vlm_output', {}) or {}
+                    if vlm_out.get('has_violation') or vlm_out.get('has_accident'):
+                        has_event = True
+                        violations = vlm_out.get('violations', [])
+                        if violations:
+                            event_type = violations[0].get('type', '未知事件')
+                            confidence = violations[0].get('confidence', 0.5)
+                        else:
+                            event_type = '检出异常'
+                            confidence = 0.5
+                        break
+
+                return {
+                    'has_event': has_event,
+                    'event_type': event_type,
+                    'confidence': confidence,
+                    'raw_result': result
+                }
+
+            except Exception as e:
+                print(f"[BatchPipeline] ❌ 分析失败: {e}")
+                traceback.print_exc()
+                raise RuntimeError(f"Pipeline分析失败: {e}") from e
+
+        _batch_processor = BatchVideoProcessor(
+            api=api,
+            batch_config=batch_config,
+            history_config=history_config,
+            pipeline_func=pipeline_func
+        )
+
+    return _batch_processor
+
+
+@app.route('/api/batch/start', methods=['POST'])
+def start_batch_analysis():
+    """启动批量遍历分析任务（支持跨日期时间段）"""
+    try:
+        data = request.get_json()
+
+        mode = data.get('mode', 'road_traverse')  # time_traverse | road_traverse
+        # 支持新的跨日期格式
+        start_date = data.get('start_date') or data.get('date')  # 兼容旧格式
+        start_time = data.get('start_time')
+        end_date = data.get('end_date') or data.get('date')  # 兼容旧格式
+        end_time = data.get('end_time')
+        road_ids = data.get('road_ids', [])  # 空列表=所有路口
+        model = data.get('model', 'qwen-vl-plus')
+        analysis_mode = data.get('analysis_mode', 'accident')
+        violation_types = data.get('violation_types', [])
+        segment_duration = data.get('segment_duration', 300)
+
+        # 验证参数
+        if not start_date or not start_time or not end_date or not end_time:
+            return jsonify({
+                'success': False,
+                'error': '缺少必需参数: start_date, start_time, end_date, end_time'
+            }), 400
+
+        processor = get_batch_processor()
+
+        # 创建批量任务（支持跨日期）
+        batch_task = processor.create_batch_task(
+            mode=mode,
+            start_date=start_date,
+            start_time=start_time,
+            end_date=end_date,
+            end_time=end_time,
+            road_ids=road_ids if road_ids else None,
+            model=model,
+            analysis_mode=analysis_mode,
+            violation_types=violation_types,
+            segment_duration=segment_duration
+        )
+
+        batch_id = batch_task.batch_id
+
+        # 创建SSE队列
+        _batch_sse_queues[batch_id] = Queue()
+
+        # 设置事件回调
+        def batch_event_callback(event_type, data):
+            if batch_id in _batch_sse_queues:
+                _batch_sse_queues[batch_id].put((event_type, data))
+
+        processor.event_callback = batch_event_callback
+
+        # 在后台线程启动任务
+        def run_batch_task():
+            try:
+                processor.start_batch_task(batch_id)
+            except Exception as e:
+                print(f"[Batch] ❌ 批量任务执行失败: {e}")
+                if batch_id in _batch_sse_queues:
+                    _batch_sse_queues[batch_id].put((
+                        BatchEventType.BATCH_ERROR,
+                        {"batch_id": batch_id, "error": str(e)}
+                    ))
+
+        thread = threading.Thread(target=run_batch_task, name=f"Batch-{batch_id}")
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'batch_id': batch_id,
+            'mode': mode,
+            'total_roads': batch_task.total_roads,
+            'message': f'批量任务已创建，共 {batch_task.total_roads} 个路口'
+        })
+
+    except Exception as e:
+        print(f"[Batch] ❌ 创建批量任务失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/batch/stop/<batch_id>', methods=['POST'])
+def stop_batch_analysis(batch_id):
+    """停止批量分析任务"""
+    try:
+        processor = get_batch_processor()
+        processor.stop_batch_task(batch_id)
+
+        return jsonify({
+            'success': True,
+            'message': '批量任务已停止'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/batch/progress/<batch_id>')
+def batch_progress_stream(batch_id):
+    """批量任务SSE进度流"""
+    def generate():
+        if batch_id not in _batch_sse_queues:
+            yield f"event: error\ndata: {{\"message\": \"批量任务不存在\"}}\n\n"
+            return
+
+        q = _batch_sse_queues[batch_id]
+
+        # 发送初始状态
+        processor = get_batch_processor()
+        status = processor.get_batch_status(batch_id)
+        if status:
+            yield f"event: init\ndata: {json.dumps(status, ensure_ascii=False)}\n\n"
+
+        # 持续监听事件
+        while True:
+            try:
+                event_type, data = q.get(timeout=30)
+
+                # 发送事件
+                event_name = event_type.value if hasattr(event_type, 'value') else str(event_type)
+                yield f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                # 任务完成或出错则退出
+                if event_type in [BatchEventType.BATCH_COMPLETE, BatchEventType.BATCH_ERROR]:
+                    break
+
+            except queue.Empty:
+                # 发送心跳保持连接
+                yield f": heartbeat\n\n"
+                continue
+
+        # 清理队列
+        if batch_id in _batch_sse_queues:
+            del _batch_sse_queues[batch_id]
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@app.route('/api/batch/status/<batch_id>')
+def get_batch_status(batch_id):
+    """获取批量任务状态"""
+    try:
+        processor = get_batch_processor()
+        status = processor.get_batch_status(batch_id)
+
+        if status:
+            return jsonify({
+                'success': True,
+                **status
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '批量任务不存在'
+            }), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/batch/skip/<batch_id>/<road_id>', methods=['POST'])
+def skip_batch_road(batch_id, road_id):
+    """跳过指定路口"""
+    try:
+        processor = get_batch_processor()
+        success = processor.skip_road(batch_id, road_id)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'路口 {road_id} 已跳过'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '无法跳过该路口'
+            }), 400
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/batch/report/<batch_id>')
+def get_batch_report(batch_id):
+    """获取批量任务汇总报告"""
+    try:
+        from traffic_vlm.config import BatchProcessConfig
+        config = BatchProcessConfig()
+        report_path = os.path.join(config.batch_result_dir, batch_id, 'report.html')
+
+        if os.path.exists(report_path):
+            return send_file(report_path, mimetype='text/html')
+        else:
+            return jsonify({
+                'success': False,
+                'error': '报告不存在'
             }), 404
 
     except Exception as e:

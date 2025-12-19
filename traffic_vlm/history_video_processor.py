@@ -85,13 +85,14 @@ class SegmentInfo:
 
 @dataclass
 class TaskInfo:
-    """任务信息"""
+    """任务信息（支持跨日期时间段）"""
     task_id: str
     road_id: str
     channel_num: str
-    date: str
-    start_time: str
-    end_time: str
+    start_date: str    # 开始日期，如 "2024-12-17"
+    start_time: str    # 开始时间，如 "20:00"
+    end_date: str      # 结束日期，如 "2024-12-19"
+    end_time: str      # 结束时间，如 "08:00"
     mode: str  # "accident" 或 "violation"
     model: str  # VLM模型
     violation_types: List[str] = field(default_factory=list)
@@ -108,8 +109,9 @@ class TaskInfo:
             "task_id": self.task_id,
             "road_id": self.road_id,
             "channel_num": self.channel_num,
-            "date": self.date,
+            "start_date": self.start_date,
             "start_time": self.start_time,
+            "end_date": self.end_date,
             "end_time": self.end_time,
             "mode": self.mode,
             "model": self.model,
@@ -197,14 +199,24 @@ class HistoryVideoProcessor:
         end_dt: datetime,
         segment_duration: int
     ) -> List[SegmentInfo]:
-        """将时间段拆分为多个片段"""
+        """将时间段拆分为多个片段（支持跨日期时间范围）"""
         segments = []
         current = start_dt
         index = 0
 
+        # 判断是否跨日期
+        is_cross_date = start_dt.date() != end_dt.date()
+
         while current < end_dt:
             seg_end = min(current + timedelta(seconds=segment_duration), end_dt)
-            time_range = f"{current.strftime('%H:%M')}-{seg_end.strftime('%H:%M')}"
+
+            # 构建时间范围字符串
+            if is_cross_date:
+                # 跨日期时包含日期信息
+                time_range = f"{current.strftime('%m/%d %H:%M')}-{seg_end.strftime('%H:%M')}"
+            else:
+                # 同一天只显示时间
+                time_range = f"{current.strftime('%H:%M')}-{seg_end.strftime('%H:%M')}"
 
             segments.append(SegmentInfo(
                 index=index,
@@ -222,8 +234,9 @@ class HistoryVideoProcessor:
         self,
         road_id: str,
         channel_num: str,
-        date: str,
+        start_date: str,
         start_time: str,
+        end_date: str,
         end_time: str,
         mode: str = "accident",
         model: str = "qwen-vl-plus",
@@ -231,14 +244,15 @@ class HistoryVideoProcessor:
         segment_duration: int = None
     ) -> TaskInfo:
         """
-        创建分析任务
+        创建分析任务（支持跨日期时间段）
 
         Args:
             road_id: 路口ID
             channel_num: 摄像头通道号
-            date: 日期 "2024-12-18"
-            start_time: 开始时间 "09:00"
-            end_time: 结束时间 "11:00"
+            start_date: 开始日期 "2024-12-17"
+            start_time: 开始时间 "20:00"
+            end_date: 结束日期 "2024-12-19"
+            end_time: 结束时间 "08:00"
             mode: 分析模式 "accident" 或 "violation"
             model: VLM模型
             violation_types: 违法类型列表
@@ -250,11 +264,11 @@ class HistoryVideoProcessor:
         task_id = str(uuid.uuid4())[:8]
         segment_duration = segment_duration or self.config.segment_duration
 
-        # 解析时间
-        start_dt = datetime.strptime(f"{date} {start_time}", "%Y-%m-%d %H:%M")
-        end_dt = datetime.strptime(f"{date} {end_time}", "%Y-%m-%d %H:%M")
+        # 解析时间（支持跨日期）
+        start_dt = datetime.strptime(f"{start_date} {start_time}", "%Y-%m-%d %H:%M")
+        end_dt = datetime.strptime(f"{end_date} {end_time}", "%Y-%m-%d %H:%M")
 
-        # 分片
+        # 分片（自动处理跨日期）
         segments = self._split_time_range(start_dt, end_dt, segment_duration)
 
         # 创建任务
@@ -262,8 +276,9 @@ class HistoryVideoProcessor:
             task_id=task_id,
             road_id=road_id,
             channel_num=channel_num,
-            date=date,
+            start_date=start_date,
             start_time=start_time,
+            end_date=end_date,
             end_time=end_time,
             mode=mode,
             model=model,
@@ -734,7 +749,7 @@ class HistoryVideoProcessor:
         <div class="summary">
             <p><strong>任务ID:</strong> {task.task_id}</p>
             <p><strong>路口:</strong> {task.road_id} | <strong>摄像头:</strong> {task.channel_num}</p>
-            <p><strong>时间段:</strong> {task.date} {task.start_time} - {task.end_time}</p>
+            <p><strong>时间段:</strong> {task.start_date} {task.start_time} → {task.end_date} {task.end_time}</p>
             <p><strong>分析模式:</strong> {"交通事故检测" if task.mode == "accident" else "交通违法检测"}</p>
             <p><strong>VLM模型:</strong> {task.model}</p>
             <hr>
