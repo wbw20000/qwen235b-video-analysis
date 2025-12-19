@@ -6,7 +6,8 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
+import asyncio
 
 from .config import VLMConfig
 
@@ -236,6 +237,8 @@ class VLMClient:
         if not base_url:
             base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         self.client = OpenAI(api_key=key, base_url=base_url)
+        # 异步客户端（用于并发调用）
+        self.async_client = AsyncOpenAI(api_key=key, base_url=base_url)
         self.config = config
 
     def build_user_prompt(
@@ -526,3 +529,166 @@ class VLMClient:
         )
 
         return parsed
+
+    # ==================== 异步并发VLM调用 ====================
+
+    async def analyze_accident_async(
+        self,
+        annotated_images: List[str],
+        intersection_info: Dict,
+        tracks_text: str,
+        traffic_light_text: str,
+        user_query: str,
+        clip_info: Optional[Dict] = None,
+    ) -> Dict:
+        """事故检索模式异步分析方法（用于并发调用）"""
+        frames_limit = getattr(self.config, 'accident_frames_per_clip', self.config.annotated_frames_per_clip)
+        images_to_send = annotated_images[:frames_limit]
+        user_prompt = self.build_accident_user_prompt(
+            intersection_info, tracks_text, traffic_light_text, user_query,
+            clip_info=clip_info,
+            annotated_images=images_to_send,
+        )
+
+        contents: List[Dict] = [{"type": "text", "text": user_prompt}]
+
+        # P0优化：图像压缩
+        max_width = self.config.image_max_width if self.config.compress_images else None
+        quality = self.config.image_quality if self.config.compress_images else None
+
+        for img_path in annotated_images[:frames_limit]:
+            contents.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_to_base64_url(img_path, max_width=max_width, quality=quality)},
+                }
+            )
+
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": ACCIDENT_SYSTEM_PROMPT}]},
+            {"role": "user", "content": contents},
+        ]
+
+        print(f"[VLM异步] 事故检索模式 - 图片数:{len(images_to_send)}")
+
+        # 异步调用VLM
+        completion = await self.async_client.chat.completions.create(
+            model=self.config.model,
+            messages=messages,
+            temperature=self.config.temperature,
+        )
+        text = completion.choices[0].message.content
+
+        print(f"[VLM异步] 响应完成 - {len(text)} 字符")
+
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = {"has_accident": False, "accidents": [], "text_summary": text}
+
+        # 保存VLM请求和响应日志
+        _save_vlm_request_log(
+            mode="accident_async",
+            model=self.config.model,
+            temperature=self.config.temperature,
+            system_prompt=ACCIDENT_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            image_paths=annotated_images[:frames_limit],
+            response_text=text,
+            parsed_response=parsed,
+            clip_info=clip_info,
+        )
+
+        return parsed
+
+    async def batch_analyze_accidents_async(
+        self,
+        clips_data: List[Dict],
+        max_concurrent: int = 2
+    ) -> List[Dict]:
+        """
+        批量异步分析多个clips
+
+        Args:
+            clips_data: 每个元素包含分析所需的全部数据
+                {
+                    "annotated_images": List[str],
+                    "intersection_info": Dict,
+                    "tracks_text": str,
+                    "traffic_light_text": str,
+                    "user_query": str,
+                    "clip_info": Optional[Dict]
+                }
+            max_concurrent: 最大并发数
+
+        Returns:
+            分析结果列表（与输入顺序对应）
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def analyze_one(data: Dict, index: int) -> Dict:
+            async with semaphore:
+                print(f"[VLM批量] 开始分析 clip #{index}")
+                try:
+                    result = await self.analyze_accident_async(
+                        annotated_images=data["annotated_images"],
+                        intersection_info=data["intersection_info"],
+                        tracks_text=data["tracks_text"],
+                        traffic_light_text=data["traffic_light_text"],
+                        user_query=data["user_query"],
+                        clip_info=data.get("clip_info"),
+                    )
+                    result["_clip_index"] = index
+                    print(f"[VLM批量] clip #{index} 完成")
+                    return result
+                except Exception as e:
+                    print(f"[VLM批量] clip #{index} 失败: {e}")
+                    return {"has_accident": False, "accidents": [], "error": str(e), "_clip_index": index}
+
+        # 并发执行所有分析任务
+        tasks = [analyze_one(data, i) for i, data in enumerate(clips_data)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理异常情况
+        final_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                final_results.append({"has_accident": False, "accidents": [], "error": str(result), "_clip_index": i})
+            else:
+                final_results.append(result)
+
+        return final_results
+
+    def batch_analyze_accidents_sync(
+        self,
+        clips_data: List[Dict],
+        max_concurrent: int = 2
+    ) -> List[Dict]:
+        """
+        同步封装的批量分析方法（方便从同步代码中调用）
+
+        内部使用asyncio运行异步批量分析
+        """
+        print(f"[VLM批量同步] 启动 {len(clips_data)} 个clips的并发分析，最大并发: {max_concurrent}")
+
+        try:
+            # 尝试获取现有事件循环
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果已在运行的事件循环中，使用线程池执行
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        self.batch_analyze_accidents_async(clips_data, max_concurrent)
+                    )
+                    return future.result()
+            else:
+                return loop.run_until_complete(
+                    self.batch_analyze_accidents_async(clips_data, max_concurrent)
+                )
+        except RuntimeError:
+            # 没有事件循环，创建新的
+            return asyncio.run(
+                self.batch_analyze_accidents_async(clips_data, max_concurrent)
+            )

@@ -264,6 +264,10 @@ class HistoryProcessConfig:
     result_dir: str = "data/history_analysis"  # 结果目录
     cleanup_on_no_event: bool = True     # 无事故/违法时删除
 
+    # 并行下载配置
+    max_concurrent_downloads: int = 2    # 并行下载数（2路）
+    prefetch_segments: int = 2           # 预取片段数
+
     def ensure_dirs(self):
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(self.result_dir, exist_ok=True)

@@ -402,12 +402,67 @@ class HistoryVideoProcessor:
         return True
 
     def _download_worker(self, task: TaskInfo):
-        """下载线程：顺序下载每个片段"""
-        for segment in task.segments:
-            if self._stop_flag.is_set():
-                break
+        """下载线程：并行下载多个片段（预取模式）"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            self._download_segment(task, segment)
+        max_workers = self.config.max_concurrent_downloads
+        logger.info(f"[并行下载] 启用{max_workers}路并行下载")
+
+        # 使用线程池实现预取式并行下载
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            segment_iter = iter(task.segments)
+
+            # 初始填充：提交前N个下载任务
+            for _ in range(max_workers):
+                if self._stop_flag.is_set():
+                    break
+                seg = next(segment_iter, None)
+                if seg:
+                    future = executor.submit(self._download_segment_return, task, seg)
+                    futures[future] = seg
+
+            # 完成一个，补充一个（流水线模式）
+            while futures:
+                if self._stop_flag.is_set():
+                    # 取消所有未完成的任务
+                    for f in futures:
+                        f.cancel()
+                    break
+
+                # 等待任意一个完成
+                done_futures = []
+                for future in list(futures.keys()):
+                    if future.done():
+                        done_futures.append(future)
+
+                if not done_futures:
+                    # 没有完成的，短暂等待
+                    time.sleep(0.1)
+                    continue
+
+                for future in done_futures:
+                    segment = futures.pop(future)
+                    try:
+                        success = future.result()
+                        if success:
+                            logger.info(f"[并行下载] 片段#{segment.index} 完成，放入分析队列")
+                    except Exception as e:
+                        logger.error(f"[并行下载] 片段#{segment.index} 异常: {e}")
+
+                    # 补充新任务
+                    if not self._stop_flag.is_set():
+                        next_seg = next(segment_iter, None)
+                        if next_seg:
+                            new_future = executor.submit(self._download_segment_return, task, next_seg)
+                            futures[new_future] = next_seg
+
+        logger.info(f"[并行下载] 下载线程结束")
+
+    def _download_segment_return(self, task: TaskInfo, segment: SegmentInfo) -> bool:
+        """下载单个片段并返回结果（用于并行下载）"""
+        self._download_segment(task, segment)
+        return segment.download_status == SegmentStatus.COMPLETED
 
     def _download_segment(self, task: TaskInfo, segment: SegmentInfo):
         """下载单个片段"""

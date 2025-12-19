@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
-from .clip_sampler import cut_clip_ffmpeg, sample_frames_from_clip
+from .clip_sampler import cut_clip_ffmpeg, sample_frames_from_clip, parallel_cut_clips
 from .config import TrafficVLMConfig
 from .data_logger_and_indexer import DataLoggerAndIndexer
 from .detector_and_tracker import DetectorAndTracker
@@ -170,45 +170,48 @@ class TrafficVLMPipeline:
         clips = cluster_frames_to_clips(candidates, self.config.cluster, accident_mode=accident_query)
         self._progress(55, f"时间聚类完成，候选 clip {len(clips)}")
 
-        # 剪辑并采样
-        suspect_clips: List[Dict] = []
-        clip_success_count = 0
-        clip_fail_count = 0
+        # 剪辑并采样 - 使用多进程并行剪辑
+        print(f"\n[pipeline] 开始并行剪辑 {len(clips)} 个 clips...")
 
-        for clip in clips:
-            out_path = os.path.join(output_paths["raw_suspect_clips"], f"{clip['clip_id']}.mp4")
-            print(f"\n[pipeline] 正在剪辑 clip: {clip['clip_id']}")
-            print(f"[pipeline]   时间段: {clip['start_time']:.2f}s - {clip['end_time']:.2f}s")
-            if clip.get("is_accident"):
-                print(f"[pipeline]   事故簇，accident_score={clip.get('accident_score', 0):.2f}")
+        # 并行剪辑主clips
+        suspect_clips, clip_success_count, clip_fail_count = parallel_cut_clips(
+            clips=clips,
+            video_path=video_path,
+            output_dir=output_paths["raw_suspect_clips"],
+            max_workers=4
+        )
 
-            ok = cut_clip_ffmpeg(video_path, clip["start_time"], clip["end_time"], out_path)
-
-            if ok:
-                clip["video_path"] = out_path
-                clip["clip_source"] = "clipped"
-                clip_success_count += 1
-            else:
-                # 剪辑失败时，记录警告并使用原始视频
-                print(f"[pipeline] ⚠️ 剪辑失败，将使用原始视频进行分析")
-                clip["video_path"] = video_path
-                clip["clip_source"] = "original_fallback"
-                clip_fail_count += 1
-
-            # 事故簇输出长版 clip，便于人工/VLM复核
+        # 并行剪辑 long_version（事故clips的扩展版本）
+        long_clips_to_cut = []
+        for clip in suspect_clips:
             long_ver = clip.get("long_version")
             if clip.get("is_accident") and long_ver:
-                long_out_path = os.path.join(output_paths["raw_suspect_clips"], f"{clip['clip_id']}_long.mp4")
-                print(f"[pipeline]   生成长版 clip: {long_ver['start_time']:.2f}s - {long_ver['end_time']:.2f}s")
-                ok_long = cut_clip_ffmpeg(video_path, long_ver["start_time"], long_ver["end_time"], long_out_path)
-                if ok_long:
-                    clip["long_video_path"] = long_out_path
-                    clip["long_clip_source"] = "clipped"
-                else:
-                    clip["long_video_path"] = video_path
-                    clip["long_clip_source"] = "original_fallback"
+                long_clips_to_cut.append({
+                    "clip_id": f"{clip['clip_id']}_long",
+                    "start_time": long_ver["start_time"],
+                    "end_time": long_ver["end_time"],
+                    "parent_clip_id": clip["clip_id"],  # 记录父clip
+                })
 
-            suspect_clips.append(clip)
+        if long_clips_to_cut:
+            print(f"[pipeline] 并行剪辑 {len(long_clips_to_cut)} 个 long_version clips...")
+            long_results, long_success, long_fail = parallel_cut_clips(
+                clips=long_clips_to_cut,
+                video_path=video_path,
+                output_dir=output_paths["raw_suspect_clips"],
+                max_workers=4
+            )
+
+            # 将long_version结果关联回原clip
+            long_result_map = {r["clip_id"].replace("_long", ""): r for r in long_results}
+            for clip in suspect_clips:
+                if clip["clip_id"] in long_result_map:
+                    long_r = long_result_map[clip["clip_id"]]
+                    clip["long_video_path"] = long_r.get("video_path", video_path)
+                    clip["long_clip_source"] = long_r.get("clip_source", "original_fallback")
+
+            clip_success_count += long_success
+            clip_fail_count += long_fail
 
         print(f"\n[pipeline] 剪辑统计: 成功 {clip_success_count} 段, 失败 {clip_fail_count} 段")
         self._progress(65, f"剪辑完成 {clip_success_count}/{len(suspect_clips)} 段")

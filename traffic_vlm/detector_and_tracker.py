@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import numpy as np
 
 from .config import DetectorConfig
@@ -120,3 +120,129 @@ class DetectorAndTracker:
 
         print(f"[DetectorAndTracker] 输出 frame_results 长度: {len(frame_results)}, tracks 数量: {len(tracks)}")
         return {"tracks": tracks, "frame_results": frame_results}
+
+    def run_on_frames_batched(
+        self,
+        frames: List[Tuple[float, "np.ndarray"]],
+        batch_size: int = 8,
+        use_tracking: bool = False
+    ) -> Dict:
+        """
+        批量处理多帧，提高GPU利用率。
+
+        Args:
+            frames: 帧列表 [(timestamp, frame), ...]
+            batch_size: 批处理大小（仅对predict模式有效）
+            use_tracking: 是否使用跟踪（True时退化为逐帧处理）
+
+        Returns:
+            与 run_on_frames 相同格式的结果
+        """
+        if not self.config.enabled or self.model is None:
+            return {"tracks": {}, "frame_results": []}
+
+        # 如果需要跟踪，使用原有逻辑（跟踪需要按序进行）
+        if use_tracking:
+            return self.run_on_frames(frames)
+
+        # 批量检测模式（不跟踪）
+        print(f"[DetectorAndTracker] 批量检测模式，batch_size={batch_size}，共{len(frames)}帧")
+
+        frame_results = []
+        timestamps = [ts for ts, _ in frames]
+        frame_arrays = [f for _, f in frames]
+
+        # 批量推理
+        for i in range(0, len(frame_arrays), batch_size):
+            batch_frames = frame_arrays[i:i + batch_size]
+            batch_ts = timestamps[i:i + batch_size]
+
+            try:
+                # 使用 predict 进行批量推理（比 track 快，但无跟踪ID）
+                preds = self.model.predict(
+                    batch_frames,
+                    conf=self.config.confidence_threshold,
+                    iou=self.config.iou_threshold,
+                    imgsz=getattr(self.config, 'imgsz', 1280),
+                    half=True,  # FP16加速
+                    verbose=False,
+                )
+
+                # 处理每帧结果
+                for j, (ts, pred) in enumerate(zip(batch_ts, preds)):
+                    detections = []
+                    boxes = pred.boxes
+                    if boxes is not None:
+                        for box in boxes:
+                            xyxy = box.xyxy[0].tolist()
+                            cls_idx = int(box.cls[0].item()) if box.cls is not None else -1
+                            score = float(box.conf[0].item()) if box.conf is not None else 0.0
+                            # 无跟踪ID，使用帧内索引
+                            detections.append({
+                                "track_id": -1,  # 表示无跟踪
+                                "bbox": xyxy,
+                                "category": cls_idx,
+                                "score": score,
+                                "timestamp": ts,
+                            })
+
+                    frame_results.append({"timestamp": ts, "detections": detections})
+
+            except Exception as e:
+                print(f"[DetectorAndTracker] ⚠️ 批量检测异常: {e}")
+                # 回退到逐帧处理
+                for ts, frame in zip(batch_ts, batch_frames):
+                    frame_results.append({"timestamp": ts, "detections": []})
+
+        print(f"[DetectorAndTracker] 批量检测完成，共处理{len(frame_results)}帧")
+        return {"tracks": {}, "frame_results": frame_results}
+
+    def detect_batch(
+        self,
+        frames: List["np.ndarray"],
+        batch_size: int = 8
+    ) -> List[List[Dict]]:
+        """
+        纯检测模式批处理（无跟踪，最高效率）
+
+        Args:
+            frames: 帧数组列表
+            batch_size: 批处理大小
+
+        Returns:
+            每帧的检测结果列表 [[{bbox, category, score}, ...], ...]
+        """
+        if not self.config.enabled or self.model is None:
+            return [[] for _ in frames]
+
+        all_detections = []
+
+        for i in range(0, len(frames), batch_size):
+            batch = frames[i:i + batch_size]
+
+            try:
+                preds = self.model.predict(
+                    batch,
+                    conf=self.config.confidence_threshold,
+                    iou=self.config.iou_threshold,
+                    imgsz=getattr(self.config, 'imgsz', 1280),
+                    half=True,
+                    verbose=False,
+                )
+
+                for pred in preds:
+                    frame_dets = []
+                    if pred.boxes is not None:
+                        for box in pred.boxes:
+                            frame_dets.append({
+                                "bbox": box.xyxy[0].tolist(),
+                                "category": int(box.cls[0].item()),
+                                "score": float(box.conf[0].item()),
+                            })
+                    all_detections.append(frame_dets)
+
+            except Exception as e:
+                print(f"[DetectorAndTracker] ⚠️ detect_batch异常: {e}")
+                all_detections.extend([[] for _ in batch])
+
+        return all_detections

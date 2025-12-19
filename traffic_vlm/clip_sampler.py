@@ -3,8 +3,133 @@ from __future__ import annotations
 import os
 import subprocess
 from typing import Dict, List, Tuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import cv2
+
+
+def _cut_clip_task(args: Tuple[str, float, float, str, str, dict]) -> dict:
+    """
+    用于多进程执行的剪辑任务（需要在模块级别定义以支持pickle）
+
+    Args:
+        args: (input_path, start, end, output_path, clip_id, clip_dict)
+
+    Returns:
+        包含剪辑结果的字典
+    """
+    input_path, start, end, output_path, clip_id, clip_extras = args
+
+    result = {
+        "clip_id": clip_id,
+        "success": False,
+        "video_path": None,
+        "clip_source": None,
+        "error": None,
+        "extras": clip_extras  # 保留额外的clip信息（如is_accident, long_version等）
+    }
+
+    try:
+        success = cut_clip_ffmpeg(input_path, start, end, output_path)
+        if success:
+            result["success"] = True
+            result["video_path"] = output_path
+            result["clip_source"] = "clipped"
+        else:
+            result["video_path"] = input_path
+            result["clip_source"] = "original_fallback"
+            result["error"] = "剪辑失败"
+    except Exception as e:
+        result["video_path"] = input_path
+        result["clip_source"] = "original_fallback"
+        result["error"] = str(e)
+
+    return result
+
+
+def parallel_cut_clips(
+    clips: List[dict],
+    video_path: str,
+    output_dir: str,
+    max_workers: int = 4
+) -> Tuple[List[dict], int, int]:
+    """
+    并行剪辑多个视频片段
+
+    Args:
+        clips: clip信息列表，每个必须包含 clip_id, start_time, end_time
+        video_path: 源视频路径
+        output_dir: 输出目录
+        max_workers: 最大并行进程数
+
+    Returns:
+        (更新后的clips列表, 成功数, 失败数)
+    """
+    print(f"[clip_sampler] 启动{max_workers}进程并行剪辑，共{len(clips)}个片段")
+
+    # 准备任务参数
+    tasks = []
+    for clip in clips:
+        out_path = os.path.join(output_dir, f"{clip['clip_id']}.mp4")
+        extras = {
+            "is_accident": clip.get("is_accident", False),
+            "long_version": clip.get("long_version"),
+            "accident_score": clip.get("accident_score", 0),
+        }
+        tasks.append((
+            video_path,
+            clip["start_time"],
+            clip["end_time"],
+            out_path,
+            clip["clip_id"],
+            extras
+        ))
+
+    # 并行执行
+    results = {}
+    success_count = 0
+    fail_count = 0
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_cut_clip_task, task): task[4] for task in tasks}  # task[4] = clip_id
+
+        for future in as_completed(futures):
+            clip_id = futures[future]
+            try:
+                result = future.result()
+                results[clip_id] = result
+                if result["success"]:
+                    success_count += 1
+                    print(f"[clip_sampler] ✓ {clip_id} 剪辑完成")
+                else:
+                    fail_count += 1
+                    print(f"[clip_sampler] ✗ {clip_id} 剪辑失败: {result.get('error', '未知')}")
+            except Exception as e:
+                fail_count += 1
+                results[clip_id] = {
+                    "clip_id": clip_id,
+                    "success": False,
+                    "video_path": video_path,
+                    "clip_source": "original_fallback",
+                    "error": str(e)
+                }
+                print(f"[clip_sampler] ✗ {clip_id} 进程异常: {e}")
+
+    # 更新原始clips列表
+    updated_clips = []
+    for clip in clips:
+        clip_id = clip["clip_id"]
+        if clip_id in results:
+            result = results[clip_id]
+            clip["video_path"] = result["video_path"]
+            clip["clip_source"] = result["clip_source"]
+        else:
+            clip["video_path"] = video_path
+            clip["clip_source"] = "original_fallback"
+        updated_clips.append(clip)
+
+    print(f"[clip_sampler] 并行剪辑完成: 成功{success_count}, 失败{fail_count}")
+    return updated_clips, success_count, fail_count
 
 
 def cut_clip_ffmpeg(input_path: str, start: float, end: float, output_path: str) -> bool:
