@@ -52,6 +52,7 @@ class ClusterConfig:
     accident_long_extra_post: float = 5.0  # 事故长版额外后置缓冲
     accident_score_weight: float = 0.6  # clip_score 中事故信号的权重
     accident_score_threshold: float = 0.35  # 判定事故簇的下限
+    clip_score_max_weight: float = 0.6  # clip_score中max的权重（0~1），0.6表示60%max+40%mean
 
 
 @dataclass
@@ -81,10 +82,165 @@ class VLMConfig:
     clip_score_threshold: float = 0.35  # clip_score低于此值跳过VLM调用
     skip_low_score_vlm: bool = True     # 是否启用阈值过滤
 
-    # P0优化：图像压缩减少传输
+    # P0优化：图像压缩减少传输（当前已关闭，发送原始标注图片）
     image_max_width: int = 960          # 图像最大宽度（像素）
     image_quality: int = 70             # JPEG压缩质量（1-100）
-    compress_images: bool = True        # 是否启用图像压缩
+    compress_images: bool = False       # 是否启用图像压缩（False=发送原始图片）
+
+    # VLM并行调用配置
+    vlm_max_concurrent: int = 3         # VLM最大并发数（3个并发请求）
+
+    # VLM结果置信度分级（软过滤，降低误检率）
+    confidence_confirmed_threshold: float = 0.7   # >= 0.7 为"确定事故"
+    confidence_suspected_threshold: float = 0.4   # 0.4-0.7 为"疑似事故"
+    enable_confidence_filter: bool = True         # 是否启用置信度分级（仅事故模式）
+
+
+@dataclass
+class TrajectoryScoreConfig:
+    """轨迹碰撞评分配置（用于降低误检率）"""
+
+    enabled: bool = True                          # 是否启用轨迹评分
+    time_window_seconds: float = 3.0              # 违法模式时间窗口
+    accident_time_window_seconds: float = 4.0     # 事故模式时间窗口
+    min_similarity_score: float = 0.35            # 只处理相似度>=0.35的候选
+
+    # collision_score 参数
+    collision_iou_threshold: float = 0.1          # IOU超过此值开始计分
+    collision_distance_threshold: float = 100     # 中心距离阈值（像素）
+
+    # deceleration_score 参数
+    deceleration_threshold: float = 0.3           # 速度变化阈值（相对值）
+    min_track_length: int = 3                     # 最小轨迹长度
+
+
+@dataclass
+class CoverageConfig:
+    """事故过程完整性评分配置
+
+    用于评估clip是否覆盖【事故发生前→碰撞瞬间→事故后】的完整因果链。
+    包含完整过程的clip会获得更高的coverage_score，从而在排序中提升。
+    """
+
+    enabled: bool = True                          # 是否启用coverage评分
+
+    # 目标覆盖窗口（秒）
+    pre_roll: float = 8.0                         # 碰撞前需要覆盖的时长
+    post_roll: float = 12.0                       # 碰撞后需要覆盖的时长
+
+    # 最终排序分权重
+    # final_score = base_score + lambda_coverage * coverage_score - mu_late * late_start_penalty
+    lambda_coverage: float = 0.20                 # coverage_score权重
+    mu_late: float = 0.03                         # late_start_penalty惩罚系数
+
+    # 日志配置
+    log_ranking: bool = True                      # 是否输出排名日志
+
+
+@dataclass
+class VLMSamplingConfig:
+    """VLM t0窗口高频抽帧配置"""
+
+    enabled: bool = True                          # 是否启用t0窗口抽帧
+
+    # t0窗口参数
+    t0_window_pre: float = 2.0                    # 碰撞前窗口（秒）
+    t0_window_post: float = 3.0                   # 碰撞后窗口（秒）
+    fps: int = 5                                  # 窗口内抽帧fps（5-10）
+
+    # 额外补帧
+    extra_pre: float = 6.0                        # 额外事故前帧时间点
+    extra_post: float = 10.0                      # 额外事故后帧时间点
+
+    # ROI参数
+    roi_mode: str = "union"                       # union | event_window
+    roi_scale: float = 1.5                        # ROI扩展比例（1.3-1.8）
+    roi_window_size: int = 640                    # event_window模式下的窗口大小
+
+    # 调试输出
+    debug_dump: bool = True                       # 是否输出调试帧
+    debug_dir: str = "data/debug"                 # 调试输出目录
+
+
+@dataclass
+class VLMRetentionConfig:
+    """VLM候选保留策略配置（有条件保留）"""
+
+    enabled: bool = True                          # 是否启用保留策略
+
+    # 保留阈值
+    accident_score_threshold: float = 1.0         # accident_score >= 此值时考虑保留
+    force_keep_on_uncertain: bool = True          # verdict=UNCERTAIN时保留
+    force_keep_on_post_event: bool = True         # verdict=POST_EVENT_ONLY时保留
+
+    # 有条件保留（verdict=NO时的额外条件）
+    validity_threshold: float = 0.3               # t0_validity >= 此值时保留NO
+    risk_peak_threshold: float = 0.25             # risk_peak >= 此值时保留NO
+    roi_median_threshold: float = 80.0            # roi_median >= 此值时保留NO
+
+    # 严格证据要求
+    strict_evidence_required: bool = True         # NO高置信但无证据时降级为UNCERTAIN
+
+    # 保留状态
+    needs_review_label: str = "NEEDS_REVIEW"      # 保留候选的标签
+
+
+@dataclass
+class FileEventLocatorConfig:
+    """文件级事件定位配置"""
+
+    # 风险时间序列采样
+    risk_sampling_fps: float = 2.0                # 采样频率(Hz)
+
+    # 峰值检测
+    top_n_peaks: int = 5                          # TopN风险峰值数量
+    peak_min_distance_sec: float = 3.0            # 峰值间最小间距(秒)
+    peak_threshold: float = 0.15                  # 峰值阈值(0~1)
+
+    # 子候选窗口
+    pre_roll: float = 8.0                         # 事故前覆盖时长(秒)
+    post_roll: float = 12.0                       # 事故后覆盖时长(秒)
+    merge_gap_sec: float = 3.0                    # 子候选合并间隔(秒)
+
+    # 候选模式
+    candidate_mode: str = "file_plus_subclips"    # file_only | file_plus_subclips
+
+    # t0_validity 验证阈值
+    min_distance_threshold: float = 150.0         # 最小距离阈值(像素)
+    distance_drop_threshold: float = 0.3          # 距离突降阈值(相对值)
+    velocity_change_threshold: float = 0.4        # 速度变化阈值(相对值)
+    iou_contact_threshold: float = 0.05           # IoU接触阈值
+
+
+@dataclass
+class RankScoreConfig:
+    """排序评分配置（单一rank_score）
+
+    语义对齐：
+    - full_process_score: 仅当verdict=YES时才可能>0，表示完整覆盖事故过程
+    - post_event_score: 仅当verdict=POST_EVENT_ONLY时=1，表示仅捕捉事故后果
+    - rank_score: 唯一排序主分
+    """
+
+    # rank_score公式权重
+    # rank_score = final_score + full_process_bonus - post_event_penalty + confirm_bonus
+    full_process_bonus_weight: float = 0.20       # B: full_process_bonus = B * full_process_score
+    post_event_penalty_weight: float = 0.20       # P: post_event_penalty = P * post_event_score
+    confirm_bonus_weight: float = 0.15            # 确认事故加分权重
+
+    # full_process_score 计算
+    # full_process_score = pre_score * impact_score * post_score (仅当verdict=YES时)
+    pre_roll: float = 8.0                         # 碰撞前目标覆盖时长
+    post_roll: float = 12.0                       # 碰撞后目标覆盖时长
+    impact_window: float = 2.0                    # 碰撞窗口半宽（秒）
+
+    # 前置分 pre_score = min(1.0, t0 / pre_roll)
+    # 冲击分 impact_score = t0_validity
+    # 后置分 post_score = min(1.0, (duration - t0) / post_roll)
+
+    # 确认加分条件
+    confirm_verdict_bonus: float = 0.10           # verdict=YES 加分
+    uncertain_verdict_bonus: float = 0.05         # verdict=UNCERTAIN 加分
 
 
 @dataclass
@@ -233,22 +389,60 @@ class TemplateConfig:
 
 @dataclass
 class TsingcloudConfig:
-    """云控智行API配置"""
+    """云控智行API配置
 
-    app_key: str = ""          # 从环境变量 TSINGCLOUD_APP_KEY 读取
-    password: str = ""         # 从环境变量 TSINGCLOUD_PASSWORD 读取
+    双账号模式：
+    - HTTP轮询账号 (app_key/password): 用于 /v2x/platform/device/road/info 接口
+    - RTSP账号 (rtsp_app_key/rtsp_password): 用于 /monitorModel/singleCameraQuery2 接口
+
+    下载策略：先尝试RTSP（更快），失败后回退到HTTP轮询
+    """
+
+    # HTTP轮询账号（用于 videoType=2,3 接口）
+    app_key: str = "wangbowen"
+    password: str = "YwKSBcgWUI6"
+
+    # RTSP账号（用于 singleCameraQuery2 接口）
+    rtsp_app_key: str = "wangweiran"
+    rtsp_password: str = "zJ952v9eFOi"
+
+    # 设备映射文件路径（RTSP需要将roadId转换为deviceId）
+    # 默认为空，会在__post_init__中设置相对路径
+    device_mapping_file: str = ""
+
     base_url: str = "https://rc.ccg.bcavt.com:8760/infraCloud"
     request_interval: float = 1.0    # 请求间隔（秒），防止限流
     poll_interval: float = 30.0      # URL轮询间隔（秒）
     poll_timeout: float = 300.0      # URL轮询超时（秒）
     verify_ssl: bool = False         # 是否验证SSL证书
+    enable_rtsp: bool = True         # 启用RTSP下载（先RTSP后轮询）
 
     def __post_init__(self):
-        # 尝试从环境变量读取凭据
-        if not self.app_key:
-            self.app_key = os.environ.get("TSINGCLOUD_APP_KEY", "")
-        if not self.password:
-            self.password = os.environ.get("TSINGCLOUD_PASSWORD", "")
+        # 尝试从环境变量读取凭据（环境变量优先）
+        env_key = os.environ.get("TSINGCLOUD_APP_KEY", "")
+        env_pwd = os.environ.get("TSINGCLOUD_PASSWORD", "")
+        if env_key:
+            self.app_key = env_key
+        if env_pwd:
+            self.password = env_pwd
+        # RTSP账号也支持环境变量
+        rtsp_key = os.environ.get("TSINGCLOUD_RTSP_APP_KEY", "")
+        rtsp_pwd = os.environ.get("TSINGCLOUD_RTSP_PASSWORD", "")
+        if rtsp_key:
+            self.rtsp_app_key = rtsp_key
+        if rtsp_pwd:
+            self.rtsp_password = rtsp_pwd
+
+        # 设备映射文件：优先使用环境变量，其次使用相对路径默认值
+        env_mapping = os.environ.get("TSINGCLOUD_DEVICE_MAPPING_FILE", "")
+        if env_mapping:
+            self.device_mapping_file = env_mapping
+        elif not self.device_mapping_file:
+            # 使用相对路径（项目根目录下的子目录）
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            default_path = os.path.join(project_root, "车网路口视频流相关资料", "deviceDJKK.csv")
+            if os.path.exists(default_path):
+                self.device_mapping_file = default_path
 
 
 @dataclass
@@ -265,12 +459,27 @@ class HistoryProcessConfig:
     cleanup_on_no_event: bool = True     # 无事故/违法时删除
 
     # 并行下载配置
-    max_concurrent_downloads: int = 2    # 并行下载数（2路）
+    max_concurrent_downloads: int = 5    # 并行下载数（5路）
     prefetch_segments: int = 2           # 预取片段数
+    max_concurrent_per_camera: int = 2   # 同一摄像头最大并行下载数（避免API限流）
+
+    # 视频缓存配置
+    video_cache_dir: str = "cache/videos"    # 缓存目录
+    min_video_size: int = 100 * 1024         # 最小有效文件大小(100KB)
+    enable_video_cache: bool = True          # 启用缓存
+
+    # RTSP下载超时配置
+    rtsp_download_buffer: int = 120          # RTSP下载缓冲时间（秒）
+
+    def get_rtsp_download_timeout(self) -> int:
+        """计算RTSP下载超时 = 分片时长 + 缓冲时间"""
+        return self.segment_duration + self.rtsp_download_buffer
 
     def ensure_dirs(self):
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(self.result_dir, exist_ok=True)
+        if self.enable_video_cache:
+            os.makedirs(self.video_cache_dir, exist_ok=True)
 
 
 @dataclass
@@ -283,7 +492,7 @@ class BatchProcessConfig:
     road_retry_count: int = 1            # 路口级别重试次数
     camera_retry_count: int = 1          # 摄像头级别重试次数
     skip_on_all_camera_fail: bool = True # 所有摄像头失败时跳过路口
-    concurrent_cameras: int = 1          # 同时处理的摄像头数（建议1，避免API限流）
+    concurrent_cameras: int = 2          # 同时处理的摄像头数（RTSP模式下生效，HTTP模式强制为1）
     batch_temp_dir: str = "temp/batch"   # 批量任务临时目录
     batch_result_dir: str = "data/batch_reports"  # 批量任务结果目录
     generate_summary_report: bool = True  # 生成汇总报告
@@ -305,6 +514,13 @@ class BatchProcessConfig:
     randomize_road_order: bool = True      # 随机化路口遍历顺序
     randomize_camera_selection: bool = True # 随机选择摄像头
 
+    # 优先路口列表：这些路口会优先遍历（在随机化之前排到最前面）
+    priority_road_ids: List[str] = field(default_factory=lambda: [
+        "1", "2", "5", "7", "8", "10", "11", "12", "13", "14", "15", "16", "17",
+        "24", "76", "78", "79", "113", "121", "154", "196", "207", "252", "253",
+        "257", "284", "285"
+    ])
+
     def ensure_dirs(self):
         os.makedirs(self.batch_temp_dir, exist_ok=True)
         os.makedirs(self.batch_result_dir, exist_ok=True)
@@ -324,6 +540,12 @@ class TrafficVLMConfig:
     tsingcloud: TsingcloudConfig = field(default_factory=TsingcloudConfig)
     history: HistoryProcessConfig = field(default_factory=HistoryProcessConfig)
     batch: BatchProcessConfig = field(default_factory=BatchProcessConfig)
+    trajectory_score: TrajectoryScoreConfig = field(default_factory=TrajectoryScoreConfig)
+    coverage: CoverageConfig = field(default_factory=CoverageConfig)
+    vlm_sampling: VLMSamplingConfig = field(default_factory=VLMSamplingConfig)
+    vlm_retention: VLMRetentionConfig = field(default_factory=VLMRetentionConfig)
+    file_event: FileEventLocatorConfig = field(default_factory=FileEventLocatorConfig)
+    rank_score: RankScoreConfig = field(default_factory=RankScoreConfig)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()
