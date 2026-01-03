@@ -20,6 +20,7 @@ import logging
 import threading
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
@@ -169,6 +170,11 @@ class BatchTaskInfo:
     violation_types: List[str] = field(default_factory=list)
     segment_duration: int = 300
 
+    # 下载方式配置
+    download_method: str = "auto"  # "auto"(先RTSP后HTTP), "rtsp", "http"
+    device_cate: str = "DJ"        # RTSP设备类型: "DJ"(全景) 或 "KK"(抓拍)
+    device_index: int = 0          # RTSP设备索引（同类型中第几个）
+
     # 高峰时段优先遍历（前端传入）
     peak_hours_enabled: bool = False  # 是否启用高峰时段优先
     peak_hours: List[tuple] = field(default_factory=list)  # [("07:00", "09:00"), ("17:00", "19:00")]
@@ -239,7 +245,8 @@ class BatchVideoProcessor:
         history_config: HistoryProcessConfig,
         pipeline_func: Callable = None,
         event_callback: Callable[[BatchEventType, dict], None] = None,
-        roads_csv_path: str = None
+        roads_csv_path: str = None,
+        tsingcloud_config: 'TsingcloudConfig' = None
     ):
         """
         初始化批量处理器
@@ -251,12 +258,14 @@ class BatchVideoProcessor:
             pipeline_func: 视频分析函数
             event_callback: SSE事件回调
             roads_csv_path: 路口CSV文件路径
+            tsingcloud_config: 云控API配置（用于RTSP双账号下载）
         """
         self.api = api
         self.batch_config = batch_config
         self.history_config = history_config
         self.pipeline_func = pipeline_func
         self.event_callback = event_callback
+        self.tsingcloud_config = tsingcloud_config
 
         # 路口CSV路径
         if roads_csv_path:
@@ -323,9 +332,56 @@ class BatchVideoProcessor:
         self,
         road_id: str,
         start_str: str,
-        end_str: str
+        end_str: str,
+        download_method: str = "auto"
     ) -> List[CameraInfo]:
-        """获取路口的全景摄像头列表"""
+        """
+        获取路口的全景摄像头列表
+
+        Args:
+            road_id: 路口ID
+            start_str: 开始时间字符串
+            end_str: 结束时间字符串
+            download_method: 下载方式 "auto"/"rtsp"/"http"
+
+        当download_method为"rtsp"时，直接从设备映射文件获取设备信息，
+        不调用HTTP接口（避免权限问题）。
+        """
+        # 仅RTSP模式：从设备映射文件获取设备信息，跳过HTTP接口
+        if download_method == "rtsp" and self.tsingcloud_config:
+            try:
+                from .tsingcloud_api import DeviceMapper
+                device_mapper = DeviceMapper(self.tsingcloud_config.device_mapping_file)
+
+                # 获取全景设备（DJ）
+                device_cate = "DJ" if self.batch_config.camera_filter == "panoramic" else None
+                devices = device_mapper.get_all_devices(road_id, device_cate)
+
+                if not devices:
+                    logger.warning(f"路口 {road_id} 设备映射文件中无{device_cate or '任何'}设备")
+                    return []
+
+                # 构造虚拟的CameraInfo对象
+                cameras = []
+                for i, dev in enumerate(devices):
+                    camera_type = 1 if dev.get('cate') == 'DJ' else 0
+                    cameras.append(CameraInfo(
+                        channel_num=f"RTSP_{dev.get('cate', 'DJ')}_{i}",  # 虚拟通道号
+                        camera_type=camera_type,
+                        camera_type_str="全景" if camera_type == 1 else "抓拍",
+                        request_id="",  # RTSP模式不需要requestId
+                        sn=dev.get('sn', ''),
+                        cam_std_code=dev.get('deviceId', '')
+                    ))
+
+                logger.info(f"路口 {road_id} 从设备映射获取到 {len(cameras)} 个设备（RTSP模式）")
+                return cameras
+
+            except Exception as e:
+                logger.error(f"路口 {road_id} 从设备映射获取设备失败: {e}")
+                return []
+
+        # auto/http模式：调用HTTP接口获取摄像头列表
         try:
             cameras = self.api.get_road_cameras(road_id, start_str, end_str)
 
@@ -353,7 +409,10 @@ class BatchVideoProcessor:
         violation_types: List[str] = None,
         segment_duration: int = None,
         peak_hours_enabled: bool = None,
-        peak_hours: List[tuple] = None
+        peak_hours: List[tuple] = None,
+        download_method: str = "auto",
+        device_cate: str = "DJ",
+        device_index: int = 0
     ) -> BatchTaskInfo:
         """
         创建批量任务（支持跨日期时间段）
@@ -371,6 +430,9 @@ class BatchVideoProcessor:
             segment_duration: 分片时长（秒）
             peak_hours_enabled: 是否启用高峰时段优先（前端传入覆盖配置）
             peak_hours: 高峰时段列表 [("07:00", "09:00"), ("17:00", "19:00")]
+            download_method: 下载方式 "auto"(先RTSP后HTTP), "rtsp", "http"
+            device_cate: RTSP设备类型 "DJ"(全景) 或 "KK"(抓拍)
+            device_index: RTSP设备索引（同类型中第几个）
 
         Returns:
             BatchTaskInfo
@@ -400,8 +462,25 @@ class BatchVideoProcessor:
             road_list = road_list[:self.batch_config.max_roads_per_batch]
             logger.warning(f"路口数量超限，截取前 {self.batch_config.max_roads_per_batch} 个")
 
-        # 随机化路口顺序
-        if self.batch_config.randomize_road_order:
+        # 优先路口处理：将授权/优先路口放到最前面
+        priority_ids = set(self.batch_config.priority_road_ids)
+        if priority_ids:
+            priority_roads = [rid for rid in road_list if rid in priority_ids]
+            other_roads = [rid for rid in road_list if rid not in priority_ids]
+
+            # 优先路口内部可以随机化
+            if self.batch_config.randomize_road_order and priority_roads:
+                random.shuffle(priority_roads)
+
+            # 其他路口随机化
+            if self.batch_config.randomize_road_order and other_roads:
+                random.shuffle(other_roads)
+
+            # 合并：优先路口在前
+            road_list = priority_roads + other_roads
+            logger.info(f"[优先遍历] 优先路口 {len(priority_roads)} 个排前: {priority_roads[:5]}...")
+        elif self.batch_config.randomize_road_order:
+            # 没有优先路口时的原有随机化逻辑
             road_list = road_list.copy()  # 避免修改原列表
             random.shuffle(road_list)
             logger.info(f"[随机化] 路口顺序已随机打乱，首个路口: {road_list[0] if road_list else 'N/A'}")
@@ -427,6 +506,9 @@ class BatchVideoProcessor:
             analysis_mode=analysis_mode,
             violation_types=violation_types or [],
             segment_duration=segment_duration,
+            download_method=download_method,
+            device_cate=device_cate,
+            device_index=device_index,
             peak_hours_enabled=peak_hours_enabled,
             peak_hours=peak_hours,
             roads=road_tasks,
@@ -672,8 +754,11 @@ class BatchVideoProcessor:
         result = {"events_found": 0, "cameras_processed": 0}
 
         try:
-            # 获取全景摄像头列表
-            cameras = self._get_panoramic_cameras(road_id, start_str, end_str)
+            # 获取全景摄像头列表（根据download_method选择获取方式）
+            cameras = self._get_panoramic_cameras(
+                road_id, start_str, end_str,
+                download_method=batch_task.download_method
+            )
 
             if not cameras:
                 road_task.status = RoadStatus.SKIPPED
@@ -703,31 +788,70 @@ class BatchVideoProcessor:
 
             # 找到选中的摄像头任务
             selected_channel_nums = {c.channel_num for c in cameras_to_process}
+            selected_camera_tasks = [
+                ct for ct in road_task.cameras
+                if ct.camera_info.channel_num in selected_channel_nums
+            ]
 
-            # 处理选中的摄像头（只处理高峰时段）
-            for camera_task in road_task.cameras:
-                if camera_task.camera_info.channel_num not in selected_channel_nums:
-                    continue
-                if self._stop_flag.is_set():
-                    break
-
+            # 定义处理单个摄像头所有高峰时段的函数
+            def process_camera_peak_hours(camera_task: CameraTask) -> Dict[str, Any]:
+                """处理单个摄像头的所有高峰时段"""
+                cam_result = {"events_found": 0, "success": True, "error": None}
                 try:
-                    # 为每个高峰时段创建分析任务
                     for peak_start, peak_end in peak_hours:
+                        if self._stop_flag.is_set():
+                            break
                         self._process_camera_time_range(
                             batch_task, road_task, camera_task,
                             time_start=peak_start,
                             time_end=peak_end,
                             time_type="peak"
                         )
-
-                    result["cameras_processed"] += 1
-                    result["events_found"] += camera_task.events_found
-
+                    cam_result["events_found"] = camera_task.events_found
                 except Exception as e:
                     camera_task.status = CameraStatus.FAILED
                     camera_task.error_message = str(e)
                     road_task.skipped_cameras += 1
+                    cam_result["success"] = False
+                    cam_result["error"] = str(e)
+                return cam_result
+
+            # 根据下载方式决定是否并行处理摄像头
+            use_parallel = batch_task.download_method in ("rtsp", "auto")
+            max_concurrent_cameras = self.batch_config.concurrent_cameras if use_parallel else 1
+
+            if use_parallel and max_concurrent_cameras > 1 and len(selected_camera_tasks) > 1:
+                # RTSP 模式：并行处理摄像头
+                self._log(batch_id, "debug",
+                          f"路口 {road_id} 高峰时段并行处理 {len(selected_camera_tasks)} 个摄像头",
+                          category="road")
+
+                with ThreadPoolExecutor(max_workers=max_concurrent_cameras) as executor:
+                    future_to_camera = {
+                        executor.submit(process_camera_peak_hours, ct): ct
+                        for ct in selected_camera_tasks
+                    }
+
+                    for future in as_completed(future_to_camera):
+                        if self._stop_flag.is_set():
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+                        try:
+                            cam_result = future.result()
+                            if cam_result["success"]:
+                                result["cameras_processed"] += 1
+                                result["events_found"] += cam_result["events_found"]
+                        except Exception as e:
+                            logger.error(f"[高峰时段] 摄像头任务异常: {e}")
+            else:
+                # HTTP 模式或单摄像头：顺序处理
+                for camera_task in selected_camera_tasks:
+                    if self._stop_flag.is_set():
+                        break
+                    cam_result = process_camera_peak_hours(camera_task)
+                    if cam_result["success"]:
+                        result["cameras_processed"] += 1
+                        result["events_found"] += cam_result["events_found"]
 
             # 更新路口状态
             road_task.status = RoadStatus.RUNNING  # 高峰时段完成，还有非高峰时段
@@ -825,28 +949,65 @@ class BatchVideoProcessor:
                 else:
                     processed_cameras = road_task.cameras[:max_cameras]
 
-            # 处理非高峰时段
-            for camera_task in processed_cameras:
-                if self._stop_flag.is_set():
-                    break
-
+            # 定义处理单个摄像头所有非高峰时段的函数
+            def process_camera_non_peak_hours(camera_task: CameraTask) -> Dict[str, Any]:
+                """处理单个摄像头的所有非高峰时段"""
+                cam_result = {"events_found": 0, "success": True, "error": None}
                 try:
-                    # 为每个非高峰时段创建分析任务
                     for slot_start, slot_end in non_peak_slots:
+                        if self._stop_flag.is_set():
+                            break
                         self._process_camera_time_range(
                             batch_task, road_task, camera_task,
                             time_start=slot_start,
                             time_end=slot_end,
                             time_type="non_peak"
                         )
-
-                    result["cameras_processed"] += 1
-                    result["events_found"] += camera_task.events_found
-
+                    cam_result["events_found"] = camera_task.events_found
                 except Exception as e:
                     self._log(batch_id, "error",
                               f"摄像头 {camera_task.camera_info.channel_num} 非高峰时段处理失败: {e}",
                               category="camera")
+                    cam_result["success"] = False
+                    cam_result["error"] = str(e)
+                return cam_result
+
+            # 根据下载方式决定是否并行处理摄像头
+            use_parallel = batch_task.download_method in ("rtsp", "auto")
+            max_concurrent_cameras = self.batch_config.concurrent_cameras if use_parallel else 1
+
+            if use_parallel and max_concurrent_cameras > 1 and len(processed_cameras) > 1:
+                # RTSP 模式：并行处理摄像头
+                self._log(batch_id, "debug",
+                          f"路口 {road_id} 非高峰时段并行处理 {len(processed_cameras)} 个摄像头",
+                          category="road")
+
+                with ThreadPoolExecutor(max_workers=max_concurrent_cameras) as executor:
+                    future_to_camera = {
+                        executor.submit(process_camera_non_peak_hours, ct): ct
+                        for ct in processed_cameras
+                    }
+
+                    for future in as_completed(future_to_camera):
+                        if self._stop_flag.is_set():
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+                        try:
+                            cam_result = future.result()
+                            if cam_result["success"]:
+                                result["cameras_processed"] += 1
+                                result["events_found"] += cam_result["events_found"]
+                        except Exception as e:
+                            logger.error(f"[非高峰时段] 摄像头任务异常: {e}")
+            else:
+                # HTTP 模式或单摄像头：顺序处理
+                for camera_task in processed_cameras:
+                    if self._stop_flag.is_set():
+                        break
+                    cam_result = process_camera_non_peak_hours(camera_task)
+                    if cam_result["success"]:
+                        result["cameras_processed"] += 1
+                        result["events_found"] += cam_result["events_found"]
 
             # 更新路口状态
             road_task.status = RoadStatus.COMPLETED
@@ -1028,7 +1189,8 @@ class BatchVideoProcessor:
             api=self.api,
             config=self.history_config,
             pipeline_func=self.pipeline_func,
-            event_callback=camera_event_callback
+            event_callback=camera_event_callback,
+            tsingcloud_config=self.tsingcloud_config  # 启用缓存共享
         )
 
         # 创建任务（使用指定的时间范围）
@@ -1215,8 +1377,11 @@ class BatchVideoProcessor:
         result = {"events_found": 0, "cameras_processed": 0}
 
         try:
-            # 获取全景摄像头列表
-            cameras = self._get_panoramic_cameras(road_id, start_str, end_str)
+            # 获取全景摄像头列表（根据download_method选择获取方式）
+            cameras = self._get_panoramic_cameras(
+                road_id, start_str, end_str,
+                download_method=batch_task.download_method
+            )
 
             if not cameras:
                 road_task.status = RoadStatus.SKIPPED
@@ -1246,23 +1411,62 @@ class BatchVideoProcessor:
 
             # 找到选中的摄像头任务
             selected_channel_nums = {c.channel_num for c in cameras_to_process}
+            selected_camera_tasks = [
+                ct for ct in road_task.cameras
+                if ct.camera_info.channel_num in selected_channel_nums
+            ]
 
-            # 处理限定数量的摄像头
-            for camera_task in road_task.cameras:
-                if camera_task.camera_info.channel_num not in selected_channel_nums:
-                    continue
-                if self._stop_flag.is_set():
-                    break
-
+            # 定义处理单个摄像头的函数
+            def process_camera_limited(camera_task: CameraTask) -> Dict[str, Any]:
+                """处理单个摄像头"""
+                cam_result = {"events_found": 0, "success": True, "error": None}
                 try:
                     self._process_camera(batch_task, road_task, camera_task)
-                    result["cameras_processed"] += 1
-                    result["events_found"] += camera_task.events_found
-
+                    cam_result["events_found"] = camera_task.events_found
                 except Exception as e:
                     camera_task.status = CameraStatus.FAILED
                     camera_task.error_message = str(e)
                     road_task.skipped_cameras += 1
+                    cam_result["success"] = False
+                    cam_result["error"] = str(e)
+                return cam_result
+
+            # 根据下载方式决定是否并行处理摄像头
+            use_parallel = batch_task.download_method in ("rtsp", "auto")
+            max_concurrent_cameras = self.batch_config.concurrent_cameras if use_parallel else 1
+
+            if use_parallel and max_concurrent_cameras > 1 and len(selected_camera_tasks) > 1:
+                # RTSP 模式：并行处理摄像头
+                self._log(batch_id, "debug",
+                          f"[Pass {pass_number}] 路口 {road_id} 并行处理 {len(selected_camera_tasks)} 个摄像头",
+                          category="road")
+
+                with ThreadPoolExecutor(max_workers=max_concurrent_cameras) as executor:
+                    future_to_camera = {
+                        executor.submit(process_camera_limited, ct): ct
+                        for ct in selected_camera_tasks
+                    }
+
+                    for future in as_completed(future_to_camera):
+                        if self._stop_flag.is_set():
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+                        try:
+                            cam_result = future.result()
+                            if cam_result["success"]:
+                                result["cameras_processed"] += 1
+                                result["events_found"] += cam_result["events_found"]
+                        except Exception as e:
+                            logger.error(f"[广度优先] 摄像头任务异常: {e}")
+            else:
+                # HTTP 模式或单摄像头：顺序处理
+                for camera_task in selected_camera_tasks:
+                    if self._stop_flag.is_set():
+                        break
+                    cam_result = process_camera_limited(camera_task)
+                    if cam_result["success"]:
+                        result["cameras_processed"] += 1
+                        result["events_found"] += cam_result["events_found"]
 
             # 更新路口状态（第一轮不标记完成，留待第二轮）
             if pass_number == 1 and max_cameras < len(cameras):
@@ -1327,31 +1531,69 @@ class BatchVideoProcessor:
                       f"[Pass {pass_number}] 深入分析路口 {road_id}，跳过前{skip_cameras}个摄像头",
                       category="road")
 
-        # 处理剩余摄像头
-        for camera_task in road_task.cameras[skip_cameras:]:
-            if self._stop_flag.is_set():
-                break
+        # 筛选待处理的摄像头
+        pending_cameras = [
+            ct for ct in road_task.cameras[skip_cameras:]
+            if ct.status == CameraStatus.PENDING
+        ]
 
-            if camera_task.status != CameraStatus.PENDING:
-                continue  # 跳过已处理的
+        if not pending_cameras:
+            self._log(batch_id, "info",
+                      f"路口 {road_id} 无待处理的剩余摄像头",
+                      category="road")
+        else:
+            # 定义处理单个摄像头的函数
+            def process_remaining_camera(camera_task: CameraTask) -> Dict[str, Any]:
+                """处理单个剩余摄像头"""
+                cam_result = {"success": True, "error": None}
+                try:
+                    if priority_time_slots:
+                        self._process_camera_with_priority_slots(
+                            batch_task, road_task, camera_task, priority_time_slots
+                        )
+                    else:
+                        self._process_camera(batch_task, road_task, camera_task)
+                except Exception as e:
+                    camera_task.status = CameraStatus.FAILED
+                    camera_task.error_message = str(e)
+                    road_task.skipped_cameras += 1
+                    self._log(batch_id, "error",
+                              f"摄像头 {camera_task.camera_info.channel_num} 处理失败: {e}",
+                              category="camera")
+                    cam_result["success"] = False
+                    cam_result["error"] = str(e)
+                return cam_result
 
-            try:
-                # 如果有优先时段，使用优先时段的时间范围进行分析
-                if priority_time_slots:
-                    self._process_camera_with_priority_slots(
-                        batch_task, road_task, camera_task, priority_time_slots
-                    )
-                else:
-                    self._process_camera(batch_task, road_task, camera_task)
+            # 根据下载方式决定是否并行处理摄像头
+            use_parallel = batch_task.download_method in ("rtsp", "auto")
+            max_concurrent_cameras = self.batch_config.concurrent_cameras if use_parallel else 1
 
-            except Exception as e:
-                camera_task.status = CameraStatus.FAILED
-                camera_task.error_message = str(e)
-                road_task.skipped_cameras += 1
+            if use_parallel and max_concurrent_cameras > 1 and len(pending_cameras) > 1:
+                # RTSP 模式：并行处理摄像头
+                self._log(batch_id, "debug",
+                          f"[Pass {pass_number}] 路口 {road_id} 并行处理 {len(pending_cameras)} 个剩余摄像头",
+                          category="road")
 
-                self._log(batch_id, "error",
-                          f"摄像头 {camera_task.camera_info.channel_num} 处理失败: {e}",
-                          category="camera")
+                with ThreadPoolExecutor(max_workers=max_concurrent_cameras) as executor:
+                    future_to_camera = {
+                        executor.submit(process_remaining_camera, ct): ct
+                        for ct in pending_cameras
+                    }
+
+                    for future in as_completed(future_to_camera):
+                        if self._stop_flag.is_set():
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logger.error(f"[深入分析] 摄像头任务异常: {e}")
+            else:
+                # HTTP 模式或单摄像头：顺序处理
+                for camera_task in pending_cameras:
+                    if self._stop_flag.is_set():
+                        break
+                    process_remaining_camera(camera_task)
 
         # 标记路口完成
         road_task.status = RoadStatus.COMPLETED
@@ -1474,7 +1716,8 @@ class BatchVideoProcessor:
                 api=self.api,
                 config=self.history_config,
                 pipeline_func=self.pipeline_func,
-                event_callback=camera_event_callback
+                event_callback=camera_event_callback,
+                tsingcloud_config=self.tsingcloud_config  # 启用缓存共享
             )
 
             # 解析时间（假设格式为 HH:MM 或完整日期时间）
@@ -1566,8 +1809,11 @@ class BatchVideoProcessor:
         })
 
         try:
-            # 获取全景摄像头列表
-            cameras = self._get_panoramic_cameras(road_id, start_str, end_str)
+            # 获取全景摄像头列表（根据download_method选择获取方式）
+            cameras = self._get_panoramic_cameras(
+                road_id, start_str, end_str,
+                download_method=batch_task.download_method
+            )
 
             if not cameras:
                 # 无全景摄像头，跳过
@@ -1595,30 +1841,46 @@ class BatchVideoProcessor:
             for cam in cameras:
                 road_task.cameras.append(CameraTask(camera_info=cam))
 
-            # 遍历摄像头
-            for camera_task in road_task.cameras:
-                if self._stop_flag.is_set():
-                    break
+            # 根据下载方式决定是否并行处理摄像头
+            # RTSP 模式：并行处理多个摄像头（不同摄像头使用不同的 RTSP 流，互不干扰）
+            # HTTP 模式：顺序处理（避免 API 限流）
+            use_parallel = batch_task.download_method in ("rtsp", "auto")
+            max_concurrent_cameras = self.batch_config.concurrent_cameras if use_parallel else 1
 
-                try:
-                    self._process_camera(batch_task, road_task, camera_task)
-                except Exception as e:
-                    # 单个摄像头失败，记录错误，继续下一个
-                    camera_task.status = CameraStatus.FAILED
-                    camera_task.error_message = str(e)
-                    road_task.skipped_cameras += 1
-                    batch_task.skipped_cameras += 1
+            if use_parallel and max_concurrent_cameras > 1:
+                self._log(batch_id, "info",
+                          f"路口 {road_id} 并行处理 {len(road_task.cameras)} 个摄像头 (RTSP模式, max_concurrent={max_concurrent_cameras})",
+                          category="road")
 
-                    self._log(batch_id, "error",
-                              f"摄像头 {camera_task.camera_info.channel_num} 处理失败: {e}",
-                              category="camera")
+                with ThreadPoolExecutor(max_workers=max_concurrent_cameras) as executor:
+                    # 提交所有摄像头任务
+                    future_to_camera = {
+                        executor.submit(self._process_camera_safe, batch_task, road_task, camera_task): camera_task
+                        for camera_task in road_task.cameras
+                    }
 
-                    self._emit_event(BatchEventType.CAMERA_SKIPPED, {
-                        "batch_id": batch_id,
-                        "road_id": road_id,
-                        "channel_num": camera_task.camera_info.channel_num,
-                        "reason": str(e)
-                    })
+                    for future in as_completed(future_to_camera):
+                        if self._stop_flag.is_set():
+                            logger.info(f"[路口遍历] 收到停止信号，取消剩余摄像头任务")
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+
+                        camera_task = future_to_camera[future]
+                        try:
+                            future.result()  # 获取结果（错误已在 _process_camera_safe 中处理）
+                        except Exception as e:
+                            # 线程池异常（不应该发生，因为 _process_camera_safe 捕获了所有异常）
+                            logger.error(f"[路口遍历] 摄像头任务异常: {e}")
+            else:
+                # HTTP 模式：顺序处理摄像头
+                self._log(batch_id, "info",
+                          f"路口 {road_id} 顺序处理 {len(road_task.cameras)} 个摄像头 (HTTP模式)",
+                          category="road")
+
+                for camera_task in road_task.cameras:
+                    if self._stop_flag.is_set():
+                        break
+                    self._process_camera_safe(batch_task, road_task, camera_task)
 
             # 路口完成
             road_task.status = RoadStatus.COMPLETED
@@ -1675,6 +1937,40 @@ class BatchVideoProcessor:
             "total_roads": batch_task.total_roads,
             "total_events_found": batch_task.total_events_found
         })
+
+    def _process_camera_safe(
+        self,
+        batch_task: BatchTaskInfo,
+        road_task: RoadTask,
+        camera_task: CameraTask
+    ):
+        """
+        安全地处理单个摄像头（用于并行执行）
+
+        捕获所有异常并更新状态，确保线程池不会因单个任务失败而中断。
+        """
+        batch_id = batch_task.batch_id
+        road_id = road_task.road_id
+
+        try:
+            self._process_camera(batch_task, road_task, camera_task)
+        except Exception as e:
+            # 单个摄像头失败，记录错误
+            camera_task.status = CameraStatus.FAILED
+            camera_task.error_message = str(e)
+            road_task.skipped_cameras += 1
+            batch_task.skipped_cameras += 1
+
+            self._log(batch_id, "error",
+                      f"摄像头 {camera_task.camera_info.channel_num} 处理失败: {e}",
+                      category="camera")
+
+            self._emit_event(BatchEventType.CAMERA_SKIPPED, {
+                "batch_id": batch_id,
+                "road_id": road_id,
+                "channel_num": camera_task.camera_info.channel_num,
+                "reason": str(e)
+            })
 
     def _process_camera(
         self,
@@ -1764,8 +2060,18 @@ class BatchVideoProcessor:
             api=self.api,
             config=self.history_config,
             pipeline_func=self.pipeline_func,
-            event_callback=camera_event_callback
+            event_callback=camera_event_callback,
+            tsingcloud_config=self.tsingcloud_config  # 传递配置以启用RTSP双账号下载
         )
+
+        # 根据摄像头类型自动选择RTSP设备类型
+        # camera_type=1（全景）→ device_cate="DJ"
+        # camera_type=0（抓拍）→ device_cate="KK"
+        camera_type = camera_task.camera_info.camera_type
+        device_cate = "DJ" if camera_type == 1 else "KK"
+        self._log(batch_id, "debug",
+                  f"摄像头 {channel_num} 类型={camera_type}, 使用设备类型={device_cate}",
+                  category="camera")
 
         # 创建任务（支持跨日期时间段）
         task = processor.create_task(
@@ -1778,7 +2084,10 @@ class BatchVideoProcessor:
             mode=batch_task.analysis_mode,
             model=batch_task.model,
             violation_types=batch_task.violation_types,
-            segment_duration=batch_task.segment_duration
+            segment_duration=batch_task.segment_duration,
+            download_method=batch_task.download_method,
+            device_cate=device_cate,  # 根据摄像头类型自动选择
+            device_index=batch_task.device_index
         )
 
         camera_task.task_id = task.task_id

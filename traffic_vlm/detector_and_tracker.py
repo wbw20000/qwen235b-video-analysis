@@ -44,6 +44,7 @@ class DetectorAndTracker:
 
     def run_on_frames(self, frames: List[Tuple[float, "np.ndarray"]]) -> Dict:
         if not self.config.enabled or self.model is None:
+            print(f"[DetectorAndTracker] 检测器未启用: enabled={self.config.enabled}, model={'已加载' if self.model else 'None'}")
             return {"tracks": {}, "frame_results": []}
 
         # 重置跟踪器，确保每个clip从干净状态开始

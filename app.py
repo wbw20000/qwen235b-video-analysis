@@ -3,6 +3,8 @@ Qwen3-VL 视频分析 Web 应用
 通过阿里云 DashScope API 调用 Qwen3-VL 模型进行视频分析
 """
 
+import atexit
+import signal
 import sys
 import io
 import os
@@ -52,6 +54,7 @@ from datetime import datetime, timedelta
 # TrafficVLM 模块
 from traffic_vlm.pipeline import TrafficVLMPipeline
 from traffic_vlm.config import TrafficVLMConfig
+from traffic_vlm.embedding_indexer import cleanup_embedding_service
 
 # 可选：高级抽帧库
 try:
@@ -1756,25 +1759,55 @@ def get_history_processor():
                 has_event = False
                 event_type = None
                 confidence = 0.0
+                confidence_level = None  # 新增：置信度分级
+                confirmed_count = 0
+                suspected_count = 0
 
                 for item in result.get('results', []):
                     vlm_out = item.get('vlm_output', {}) or {}
-                    if vlm_out.get('has_violation') or vlm_out.get('has_accident'):
-                        has_event = True
-                        violations = vlm_out.get('violations', [])
-                        if violations:
-                            event_type = violations[0].get('type', '未知事件')
-                            confidence = violations[0].get('confidence', 0.5)
-                        else:
-                            event_type = '检出异常'
-                            confidence = 0.5
-                        break
 
-                print(f"[Pipeline] 分析结果: has_event={has_event}, event_type={event_type}")
+                    # 事故模式：使用置信度分级结果
+                    if mode == 'accident':
+                        confirmed = vlm_out.get('confirmed_accidents', [])
+                        suspected = vlm_out.get('suspected_accidents', [])
+                        confirmed_count += len(confirmed)
+                        suspected_count += len(suspected)
+
+                        # 优先使用确定事故
+                        if confirmed:
+                            has_event = True
+                            event_type = confirmed[0].get('type', '确定事故')
+                            confidence = confirmed[0].get('confidence', 0.7)
+                            confidence_level = 'confirmed'
+                        elif suspected and not has_event:
+                            has_event = True
+                            event_type = suspected[0].get('type', '疑似事故')
+                            confidence = suspected[0].get('confidence', 0.5)
+                            confidence_level = 'suspected'
+                    else:
+                        # 违法检测模式：原有逻辑
+                        if vlm_out.get('has_violation') or vlm_out.get('has_accident'):
+                            has_event = True
+                            violations = vlm_out.get('violations', [])
+                            if violations:
+                                event_type = violations[0].get('type', '未知事件')
+                                confidence = violations[0].get('confidence', 0.5)
+                            else:
+                                event_type = '检出异常'
+                                confidence = 0.5
+                            break
+
+                print(f"[Pipeline] 分析结果: has_event={has_event}, event_type={event_type}, confidence_level={confidence_level}")
+                if mode == 'accident':
+                    print(f"[Pipeline] 置信度统计: 确定={confirmed_count}, 疑似={suspected_count}")
+
                 return {
                     'has_event': has_event,
                     'event_type': event_type,
                     'confidence': confidence,
+                    'confidence_level': confidence_level,  # 新增
+                    'confirmed_count': confirmed_count,    # 新增
+                    'suspected_count': suspected_count,    # 新增
                     'raw_result': result
                 }
 
@@ -1785,11 +1818,15 @@ def get_history_processor():
                 # 重新抛出异常，让调用者处理
                 raise RuntimeError(f"Pipeline分析失败: {e}") from e
 
+        # 创建 TsingcloudConfig 用于缓存共享（无论使用哪种下载方式）
+        tsingcloud_config = TsingcloudConfig()
+
         _history_processor = HistoryVideoProcessor(
             api=api,
             config=config,
             pipeline_func=pipeline_func,
-            event_callback=event_callback
+            event_callback=event_callback,
+            tsingcloud_config=tsingcloud_config  # 启用缓存共享
         )
 
     return _history_processor
@@ -1866,14 +1903,61 @@ def get_cameras(road_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/history/rtsp-devices/<road_id>', methods=['GET'])
+def get_rtsp_devices(road_id):
+    """获取路口的RTSP设备列表（从设备映射文件）"""
+    try:
+        from traffic_vlm.tsingcloud_api import DeviceMapper
+        from traffic_vlm.config import TsingcloudConfig
+
+        config = TsingcloudConfig()
+        mapper = DeviceMapper(config.device_mapping_file)
+
+        # 获取所有设备
+        all_devices = mapper.get_all_devices(road_id)
+        dj_devices = mapper.get_all_devices(road_id, "DJ")
+        kk_devices = mapper.get_all_devices(road_id, "KK")
+
+        device_list = []
+        for i, dev in enumerate(dj_devices):
+            device_list.append({
+                'device_id': dev['deviceId'],
+                'device_cate': 'DJ',
+                'device_cate_str': '全景摄像头',
+                'index': i,
+                'is_panoramic': True
+            })
+        for i, dev in enumerate(kk_devices):
+            device_list.append({
+                'device_id': dev['deviceId'],
+                'device_cate': 'KK',
+                'device_cate_str': '抓拍摄像头',
+                'index': i,
+                'is_panoramic': False
+            })
+
+        return jsonify({
+            'success': True,
+            'road_id': road_id,
+            'devices': device_list,
+            'total': len(device_list),
+            'dj_count': len(dj_devices),
+            'kk_count': len(kk_devices)
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/history/start', methods=['POST'])
 def start_history_analysis():
-    """启动历史视频批量分析任务（支持跨日期时间段）"""
+    """启动历史视频批量分析任务（支持跨日期时间段和多摄像头）"""
     try:
         data = request.get_json()
 
         road_id = data.get('road_id')
-        channel_num = data.get('channel_num')  # 或 device_id
+        channel_num = data.get('channel_num')  # HTTP轮询用（单摄像头）
+        channel_nums = data.get('channel_nums', [])  # 多摄像头模式
         # 支持新的跨日期格式
         start_date = data.get('start_date') or data.get('date')  # 兼容旧格式
         start_time = data.get('start_time')
@@ -1884,19 +1968,37 @@ def start_history_analysis():
         violation_types = data.get('violation_types', [])
         segment_duration = data.get('segment_duration', 300)
 
-        # 验证必要参数
-        if not all([road_id, channel_num, start_date, start_time, end_date, end_time]):
+        # 下载方式配置
+        download_method = data.get('download_method', 'auto')  # auto, rtsp, http
+        device_cate = data.get('device_cate', 'DJ')  # RTSP设备类型
+        device_index = data.get('device_index', 0)   # RTSP设备索引
+
+        # 兼容新旧参数：如果只传了channel_num，转为channel_nums
+        if channel_num and not channel_nums:
+            channel_nums = [channel_num]
+        if channel_nums and not channel_num:
+            channel_num = channel_nums[0]
+
+        # 验证必要参数（HTTP轮询需要channel_num，RTSP可选）
+        if not all([road_id, start_date, start_time, end_date, end_time]):
             return jsonify({
                 'success': False,
-                'error': '缺少必要参数：road_id, channel_num, start_date, start_time, end_date, end_time'
+                'error': '缺少必要参数：road_id, start_date, start_time, end_date, end_time'
+            }), 400
+
+        # HTTP轮询模式需要channel_num或channel_nums
+        if download_method == 'http' and not channel_num and not channel_nums:
+            return jsonify({
+                'success': False,
+                'error': 'HTTP轮询模式需要channel_num或channel_nums参数'
             }), 400
 
         processor = get_history_processor()
 
-        # 创建任务（支持跨日期）
+        # 创建任务（支持跨日期和多摄像头）
         task = processor.create_task(
             road_id=road_id,
-            channel_num=channel_num,
+            channel_num=channel_num or '',  # RTSP模式可以为空
             start_date=start_date,
             start_time=start_time,
             end_date=end_date,
@@ -1904,7 +2006,11 @@ def start_history_analysis():
             mode=mode,
             model=model,
             violation_types=violation_types,
-            segment_duration=segment_duration
+            segment_duration=segment_duration,
+            download_method=download_method,
+            device_cate=device_cate,
+            device_index=device_index,
+            channel_nums=channel_nums  # 多摄像头模式
         )
 
         # 创建SSE队列
@@ -1918,14 +2024,23 @@ def start_history_analysis():
         thread.daemon = True
         thread.start()
 
-        # 计算预估时间
-        total_minutes = (len(task.segments) * 5)  # 每段约5分钟
+        # 计算预估时间（兼容多摄像头模式）
+        if task.is_multi_camera():
+            total_segments = sum(len(ct.segments) for ct in task.camera_tasks)
+            camera_count = len(task.camera_tasks)
+        else:
+            total_segments = len(task.segments)
+            camera_count = 1
+
+        total_minutes = (total_segments * 5)  # 每段约5分钟
         estimated_duration = f"约{total_minutes}分钟"
 
         return jsonify({
             'success': True,
             'task_id': task.task_id,
-            'total_segments': len(task.segments),
+            'total_segments': total_segments,
+            'camera_count': camera_count,
+            'multi_camera': task.is_multi_camera(),
             'mode': mode,
             'model': model,
             'segment_duration': segment_duration,
@@ -2189,24 +2304,51 @@ def get_batch_processor():
                 has_event = False
                 event_type = None
                 confidence = 0.0
+                confidence_level = None  # 新增：置信度分级
+                confirmed_count = 0
+                suspected_count = 0
 
                 for item in result.get('results', []):
                     vlm_out = item.get('vlm_output', {}) or {}
-                    if vlm_out.get('has_violation') or vlm_out.get('has_accident'):
-                        has_event = True
-                        violations = vlm_out.get('violations', [])
-                        if violations:
-                            event_type = violations[0].get('type', '未知事件')
-                            confidence = violations[0].get('confidence', 0.5)
-                        else:
-                            event_type = '检出异常'
-                            confidence = 0.5
-                        break
+
+                    # 事故模式：使用置信度分级结果
+                    if mode == 'accident':
+                        confirmed = vlm_out.get('confirmed_accidents', [])
+                        suspected = vlm_out.get('suspected_accidents', [])
+                        confirmed_count += len(confirmed)
+                        suspected_count += len(suspected)
+
+                        # 优先使用确定事故
+                        if confirmed:
+                            has_event = True
+                            event_type = confirmed[0].get('type', '确定事故')
+                            confidence = confirmed[0].get('confidence', 0.7)
+                            confidence_level = 'confirmed'
+                        elif suspected and not has_event:
+                            has_event = True
+                            event_type = suspected[0].get('type', '疑似事故')
+                            confidence = suspected[0].get('confidence', 0.5)
+                            confidence_level = 'suspected'
+                    else:
+                        # 违法检测模式：原有逻辑
+                        if vlm_out.get('has_violation') or vlm_out.get('has_accident'):
+                            has_event = True
+                            violations = vlm_out.get('violations', [])
+                            if violations:
+                                event_type = violations[0].get('type', '未知事件')
+                                confidence = violations[0].get('confidence', 0.5)
+                            else:
+                                event_type = '检出异常'
+                                confidence = 0.5
+                            break
 
                 return {
                     'has_event': has_event,
                     'event_type': event_type,
                     'confidence': confidence,
+                    'confidence_level': confidence_level,  # 新增
+                    'confirmed_count': confirmed_count,    # 新增
+                    'suspected_count': suspected_count,    # 新增
                     'raw_result': result
                 }
 
@@ -2215,11 +2357,16 @@ def get_batch_processor():
                 traceback.print_exc()
                 raise RuntimeError(f"Pipeline分析失败: {e}") from e
 
+        # 获取云控配置（用于RTSP双账号下载）
+        from traffic_vlm.config import TsingcloudConfig
+        tsingcloud_config = TsingcloudConfig()
+
         _batch_processor = BatchVideoProcessor(
             api=api,
             batch_config=batch_config,
             history_config=history_config,
-            pipeline_func=pipeline_func
+            pipeline_func=pipeline_func,
+            tsingcloud_config=tsingcloud_config
         )
 
     return _batch_processor
@@ -2243,6 +2390,11 @@ def start_batch_analysis():
         violation_types = data.get('violation_types', [])
         segment_duration = data.get('segment_duration', 300)
 
+        # 下载方式配置
+        download_method = data.get('download_method', 'auto')  # auto, rtsp, http
+        device_cate = data.get('device_cate', 'DJ')  # RTSP设备类型
+        device_index = data.get('device_index', 0)   # RTSP设备索引
+
         # 验证参数
         if not start_date or not start_time or not end_date or not end_time:
             return jsonify({
@@ -2263,7 +2415,10 @@ def start_batch_analysis():
             model=model,
             analysis_mode=analysis_mode,
             violation_types=violation_types,
-            segment_duration=segment_duration
+            segment_duration=segment_duration,
+            download_method=download_method,
+            device_cate=device_cate,
+            device_index=device_index
         )
 
         batch_id = batch_task.batch_id
@@ -2351,7 +2506,7 @@ def batch_progress_stream(batch_id):
                 if event_type in [BatchEventType.BATCH_COMPLETE, BatchEventType.BATCH_ERROR]:
                     break
 
-            except queue.Empty:
+            except Empty:
                 # 发送心跳保持连接
                 yield f": heartbeat\n\n"
                 continue
@@ -2435,7 +2590,31 @@ def get_batch_report(batch_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _cleanup_on_exit():
+    """程序退出时清理资源"""
+    print("\n[Cleanup] 正在清理资源...")
+    try:
+        cleanup_embedding_service()
+    except Exception as e:
+        print(f"[Cleanup] 清理警告: {e}")
+    print("[Cleanup] 资源清理完成")
+
+
+def _signal_handler(signum, frame):
+    """信号处理器（Ctrl+C等）"""
+    print(f"\n[Signal] 收到信号 {signum}，正在退出...")
+    _cleanup_on_exit()
+    sys.exit(0)
+
+
 if __name__ == '__main__':
+    # 注册退出清理
+    atexit.register(_cleanup_on_exit)
+
+    # 注册信号处理（Ctrl+C）
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
     print("=" * 60)
     print("Qwen3-VL 视频分析服务 (DashScope API)")
     print("=" * 60)
@@ -2475,4 +2654,5 @@ if __name__ == '__main__':
     print()
 
     # 启动 Flask 应用
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # 禁用 reloader 避免 Windows 上的 WinError 10038 套接字错误
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True, use_reloader=False)

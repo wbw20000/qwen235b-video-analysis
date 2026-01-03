@@ -1,0 +1,1854 @@
+{
+  "total_analyzed": 231,
+  "total_time_seconds": 4797.115901708603,
+  "results": [
+    {
+      "dataset": "大样本事故数据集",
+      "video": "118.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 38.199474811553955
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "119.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-59fb04a9, verdict=YES",
+      "time": 12.394811868667603
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "120.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c35eec6b, verdict=YES",
+      "time": 20.982347011566162
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "121.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-10b51af9, verdict=YES",
+      "time": 13.840956926345825
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "122.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-38b5c125, verdict=YES",
+      "time": 25.54240345954895
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "123.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-41f96108, verdict=YES",
+      "time": 12.559361457824707
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "124.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-ea32acfa, verdict=YES",
+      "time": 13.72383999824524
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "125.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 30.073801279067993
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "126.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-4013da27, verdict=YES",
+      "time": 11.054866790771484
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "127.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.635660409927368
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "128.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-59f14a19, verdict=YES",
+      "time": 33.09423041343689
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "130.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7791ef43, verdict=YES",
+      "time": 13.246399402618408
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "131.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2cfff053, verdict=YES",
+      "time": 13.137861251831055
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "132.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c0355b31, verdict=YES",
+      "time": 20.330612897872925
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "133.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-fd61465c, verdict=YES",
+      "time": 13.499956369400024
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "134.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-60dcb1f5, verdict=YES",
+      "time": 12.249621868133545
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "135.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-11649576, verdict=YES",
+      "time": 14.014429569244385
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "136.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-92bd2e08, verdict=YES",
+      "time": 13.77225923538208
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "137.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-78b46b36, verdict=YES",
+      "time": 12.748146772384644
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "138.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-98815305, verdict=YES",
+      "time": 11.77487587928772
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "139.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-8d84de59, verdict=YES",
+      "time": 11.58153748512268
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "140.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-ac1e74e3, verdict=YES",
+      "time": 14.414007902145386
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "141.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-6cfaacf0, verdict=YES",
+      "time": 22.0798556804657
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "142.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-f909ae17, verdict=YES",
+      "time": 15.630182027816772
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "144.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7d8b1c74, verdict=YES",
+      "time": 24.742374420166016
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "145.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2cb95514, verdict=YES",
+      "time": 20.557029485702515
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "146.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7daa1c8c, verdict=YES",
+      "time": 24.81120014190674
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "147.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-004b38ec, verdict=YES",
+      "time": 11.117143392562866
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "148.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-75dcb0e4, verdict=YES",
+      "time": 11.852096796035767
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "149.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-4bdc7c08, verdict=YES",
+      "time": 26.635371208190918
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "150.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-94bb7f97, verdict=YES",
+      "time": 11.70226263999939
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "151.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-16bb7c91, verdict=YES",
+      "time": 12.679099798202515
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "152.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-ec446d13, verdict=YES",
+      "time": 13.459216833114624
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "153.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2910f226, verdict=YES",
+      "time": 14.088943719863892
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "154.mp4",
+      "ground_truth": true,
+      "verdict": "UNCERTAIN",
+      "reason": "疑似事故: clip=clip-64e1b3ce, verdict=UNCERTAIN",
+      "time": 32.83608269691467
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "155.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7a9f1105, verdict=YES",
+      "time": 11.083325862884521
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "156.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 31.615138053894043
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "157.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-94003320, verdict=YES",
+      "time": 11.741779804229736
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "159.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-4607d80b, verdict=YES",
+      "time": 20.758081912994385
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "160.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-4334feb9, verdict=YES",
+      "time": 15.528316497802734
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "161.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-bb0527a6, verdict=YES",
+      "time": 14.4126296043396
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "162.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-d0cfef8b, verdict=YES",
+      "time": 15.339786529541016
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "163.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-dab0e93c, verdict=YES",
+      "time": 23.335747718811035
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "164.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-4d9e3cfe, verdict=YES",
+      "time": 13.549328565597534
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "165.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2b6f0a94, verdict=YES",
+      "time": 13.351990222930908
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "166.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2b7009d5, verdict=YES",
+      "time": 18.865172624588013
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "168.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-6ad8c2e6, verdict=YES",
+      "time": 22.48883605003357
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "169.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-1346e868, verdict=YES",
+      "time": 13.694501638412476
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "170.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e8c980a0, verdict=YES",
+      "time": 10.819875240325928
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "171.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-9f0ff0bd, verdict=YES",
+      "time": 20.19366478919983
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "172.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-d11505de, verdict=YES",
+      "time": 12.299219131469727
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "173.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-a29c040b, verdict=YES",
+      "time": 20.941165924072266
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "174.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-43074cde, verdict=YES",
+      "time": 21.031870365142822
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "175.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-f9a03980, verdict=YES",
+      "time": 19.376316785812378
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "176.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.50801658630371
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "177.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-ac31c880, verdict=YES",
+      "time": 11.354156494140625
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "179.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c580478d, verdict=YES",
+      "time": 11.96355128288269
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "180.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e8c014db, verdict=YES",
+      "time": 11.803354263305664
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "181.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-ada59571, verdict=YES",
+      "time": 19.0174081325531
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "182.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-aab5ed83, verdict=YES",
+      "time": 12.574857711791992
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "183.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2060bdc9, verdict=YES",
+      "time": 9.87641716003418
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "184.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-a41688c6, verdict=YES",
+      "time": 13.043868064880371
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "185.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-5b627a62, verdict=YES",
+      "time": 11.071779012680054
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "186.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-66ab4cee, verdict=YES",
+      "time": 20.50483202934265
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "187.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-95d5d2bc, verdict=YES",
+      "time": 13.993762016296387
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "188.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-921edf25, verdict=YES",
+      "time": 12.301812171936035
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "189.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-dffb7c96, verdict=YES",
+      "time": 11.337579488754272
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "190.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2e6b3ec4, verdict=YES",
+      "time": 26.18305206298828
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "192.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-5ecdbf66, verdict=YES",
+      "time": 8.708709001541138
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "193.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 17.830785751342773
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "194.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-44663507, verdict=YES",
+      "time": 11.46363091468811
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "195.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.18754553794861
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "196.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.252426624298096
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "198.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c9180fdc, verdict=YES",
+      "time": 22.889058113098145
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "199.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-93c231f2, verdict=YES",
+      "time": 19.998136043548584
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "200.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-78981896, verdict=YES",
+      "time": 20.14018678665161
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "201.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-f70fc037, verdict=YES",
+      "time": 11.387215852737427
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "202.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-909bf09a, verdict=YES",
+      "time": 12.114164352416992
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "203.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 25.39275598526001
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "204.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-35e5331a, verdict=YES",
+      "time": 14.885486841201782
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "205.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-146ea9d8, verdict=YES",
+      "time": 19.012081146240234
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "207.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2a2f027c, verdict=YES",
+      "time": 11.822671175003052
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "208.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-6995d705, verdict=YES",
+      "time": 11.393510818481445
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "209.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-fe5e5e9c, verdict=YES",
+      "time": 17.88968539237976
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "210.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-aa58735c, verdict=YES",
+      "time": 12.53464388847351
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "211.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-2b91a83a, verdict=YES",
+      "time": 12.81247329711914
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "212.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-beac6bfd, verdict=YES",
+      "time": 21.972590923309326
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "213.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e69846d9, verdict=YES",
+      "time": 15.333370685577393
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "214.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-f17dc190, verdict=YES",
+      "time": 22.450268507003784
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "215.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-b52d0b3d, verdict=YES",
+      "time": 18.569835901260376
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "216.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-0980f551, verdict=YES",
+      "time": 11.83628535270691
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "217.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-95105b6c, verdict=YES",
+      "time": 11.025889158248901
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "218.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-b62214b1, verdict=YES",
+      "time": 10.677144289016724
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "220.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.156917333602905
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "221.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-f3dc6e48, verdict=YES",
+      "time": 18.762153148651123
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "222.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-40fcf98e, verdict=YES",
+      "time": 23.253488302230835
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "224.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-8cff8631, verdict=YES",
+      "time": 15.357550621032715
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "225.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-967b1803, verdict=YES",
+      "time": 13.611672639846802
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "226.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-bbd124e1, verdict=YES",
+      "time": 12.846154689788818
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "227.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-3fff7c10, verdict=YES",
+      "time": 16.417393922805786
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "228.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-f0695428, verdict=YES",
+      "time": 11.604741334915161
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "229.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 18.607096672058105
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "230.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-fc97ab38, verdict=YES",
+      "time": 15.372787952423096
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "231.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 29.839713096618652
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "232.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-99e2e1f9, verdict=YES",
+      "time": 13.507593870162964
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "233.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-6b74d6c7, verdict=YES",
+      "time": 11.668592691421509
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "234.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-dcccac1a, verdict=YES",
+      "time": 21.187246084213257
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "235.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-85897011, verdict=YES",
+      "time": 18.282023668289185
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "236.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c69db688, verdict=YES",
+      "time": 14.22748875617981
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "237.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-9e20d89c, verdict=YES",
+      "time": 17.162071704864502
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "238.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-5200a108, verdict=YES",
+      "time": 11.35214352607727
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "239.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-b52c1510, verdict=YES",
+      "time": 27.294721126556396
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "240.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-b828b251, verdict=YES",
+      "time": 15.29692530632019
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "241.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e3dc0805, verdict=YES",
+      "time": 13.136321067810059
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "242.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-af2bf0b3, verdict=YES",
+      "time": 24.1451575756073
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "243.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-39758df6, verdict=YES",
+      "time": 9.899981260299683
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "244.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7fada7e0, verdict=YES",
+      "time": 14.413263082504272
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "246.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-a45b327a, verdict=YES",
+      "time": 11.901321411132812
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "247.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e111ce11, verdict=YES",
+      "time": 11.096430778503418
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "248.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-00ffdce9, verdict=YES",
+      "time": 13.777435541152954
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "249.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-963a4341, verdict=YES",
+      "time": 23.649693727493286
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "250.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-9cc4bb9d, verdict=YES",
+      "time": 19.045065879821777
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "251.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-de5debc2, verdict=YES",
+      "time": 14.157115459442139
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "252.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-5fdb9dc2, verdict=YES",
+      "time": 24.557402849197388
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "253.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-8fcaa6f2, verdict=YES",
+      "time": 14.673115730285645
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "254.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-75a31050, verdict=YES",
+      "time": 20.034876823425293
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "255.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-31074e80, verdict=YES",
+      "time": 20.364367961883545
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "256.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-36e99b0b, verdict=YES",
+      "time": 12.645498037338257
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "257.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e21dfbaa, verdict=YES",
+      "time": 11.001182317733765
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "258.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 24.875449657440186
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "259.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-d75cc42a, verdict=YES",
+      "time": 27.34635615348816
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "261.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-148b38d4, verdict=YES",
+      "time": 21.793076038360596
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "262.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c379febe, verdict=YES",
+      "time": 15.157066822052002
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "263.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e5254bfd, verdict=YES",
+      "time": 25.619734525680542
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "264.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-448957ed, verdict=YES",
+      "time": 26.85969877243042
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "265.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-4ecf9e40, verdict=YES",
+      "time": 21.369295358657837
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "267.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 23.72997498512268
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "268.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-21fe2f64, verdict=YES",
+      "time": 24.021308660507202
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "269.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-827bb7b5, verdict=YES",
+      "time": 13.073827505111694
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "270.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 36.23789691925049
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "271.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c40aafe9, verdict=YES",
+      "time": 29.9672212600708
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "272.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c1af3cc4, verdict=YES",
+      "time": 21.195854425430298
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "273.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-94fd48cf, verdict=YES",
+      "time": 27.289958953857422
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "274.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-52e235a7, verdict=YES",
+      "time": 25.82688879966736
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "275.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-ed59e33a, verdict=YES",
+      "time": 13.060116291046143
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "276.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-45385b82, verdict=YES",
+      "time": 22.3640718460083
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "277.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-d65fc8de, verdict=YES",
+      "time": 23.502712965011597
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "278.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7daa02ea, verdict=YES",
+      "time": 18.234553337097168
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "279.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-011e4b16, verdict=YES",
+      "time": 24.09712028503418
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "280.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 27.397362232208252
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "281.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-7a3b3a9f, verdict=YES",
+      "time": 18.68889880180359
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "282.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-547f19a3, verdict=YES",
+      "time": 17.34077215194702
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "284.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 23.697582721710205
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "79.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-67508bb0, verdict=YES",
+      "time": 21.150050401687622
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "80.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-d40d72ab, verdict=YES",
+      "time": 28.7828688621521
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "81.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-6818c9cb, verdict=YES",
+      "time": 22.16730809211731
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "82.mp4",
+      "ground_truth": true,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 23.040658712387085
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "83.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-d95c5e05, verdict=YES",
+      "time": 16.33267617225647
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "84.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-08183ec0, verdict=YES",
+      "time": 17.783092975616455
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "86.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-afa1e724, verdict=YES",
+      "time": 15.685577630996704
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "87.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-69fef297, verdict=YES",
+      "time": 14.784858226776123
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "88.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-16a6c8b6, verdict=YES",
+      "time": 14.532224178314209
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "89.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-401af987, verdict=YES",
+      "time": 16.896007299423218
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "94.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-e22ec691, verdict=YES",
+      "time": 15.00650668144226
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "95.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-5c521f98, verdict=YES",
+      "time": 15.683549880981445
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "96.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-a00754e8, verdict=YES",
+      "time": 18.57796573638916
+    },
+    {
+      "dataset": "大样本事故数据集",
+      "video": "99.mp4",
+      "ground_truth": true,
+      "verdict": "YES",
+      "reason": "检测到事故: clip=clip-c3b9921e, verdict=YES",
+      "time": 19.67311930656433
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1097.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 30.45814323425293
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1098.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 36.43193340301514
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1099.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 35.98201251029968
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1100.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 33.27782082557678
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1101.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 36.622769355773926
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1102.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 37.568026542663574
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1103.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 38.14438199996948
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1104.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 35.25583267211914
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1105.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 39.21193742752075
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1106.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 37.56588649749756
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1107.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 33.85366225242615
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1108.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 30.853012084960938
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1109.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 40.2398202419281
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1110.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 40.253135442733765
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1111.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 37.87793326377869
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1112.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 36.23658466339111
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1113.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 24.537976264953613
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1114.mp4",
+      "ground_truth": false,
+      "verdict": "UNCERTAIN",
+      "reason": "疑似事故: clip=clip-bcab972b, verdict=UNCERTAIN",
+      "time": 47.17673444747925
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1115.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 34.38337516784668
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1116.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 38.10351753234863
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1117.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 35.376614809036255
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1118.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 36.61533164978027
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1119.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 33.11205315589905
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1120.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 30.6532301902771
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1121.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 35.73827338218689
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1122.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 35.442073822021484
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1123.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 36.93396759033203
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "1124.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 38.97397446632385
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2087.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 24.141831398010254
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2088.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 26.169511079788208
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2089.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 27.912703275680542
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2090.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 27.76987648010254
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2091.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 23.075247526168823
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2092.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.711029052734375
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2093.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.505040168762207
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2094.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 25.384036779403687
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2095.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.28256106376648
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2096.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.9242045879364
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2097.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.670493841171265
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2098.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.144478797912598
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2099.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 23.453545808792114
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2100.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.371132373809814
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2101.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 19.48473858833313
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2102.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.356106281280518
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2103.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.9996600151062
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2104.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.863590955734253
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2105.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.24849772453308
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2106.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 24.410948038101196
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2107.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.725884675979614
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2108.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.28667950630188
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2109.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 24.39825987815857
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2110.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.379440307617188
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2111.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 27.23923635482788
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2112.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 18.77493929862976
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2113.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.478751182556152
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2114.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.621622562408447
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2115.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 19.507208824157715
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2116.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 22.286676168441772
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2117.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 20.943000555038452
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2118.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.09810185432434
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2119.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.49865698814392
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2120.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 18.124442100524902
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2121.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.07932734489441
+    },
+    {
+      "dataset": "大样本非交通事故数据集",
+      "video": "2122.mp4",
+      "ground_truth": false,
+      "verdict": "NO",
+      "reason": "无clip通过阈值",
+      "time": 21.026931762695312
+    }
+  ]
+}

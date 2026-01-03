@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -21,32 +23,50 @@ except ImportError:
     faiss = None
 
 
-class EmbeddingIndexer:
+# ===== 全局单例：模型常驻服务 =====
+_embedding_service: Optional['EmbeddingService'] = None
+_embedding_service_lock = threading.Lock()
+
+
+class EmbeddingService:
     """
-    SigLIP 编码与向量索引。
-    - 支持 faiss 内存索引，缺省回退到 numpy 余弦。
+    SigLIP 模型常驻服务（单例）
+
+    - 模型只加载一次，常驻内存
+    - 缓存 text embeddings（模板固定时直接复用）
     """
 
     def __init__(self, config: EmbeddingConfig):
         self.config = config
         self.device = self._select_device(config.device)
 
-        # 尝试离线加载，如果失败则联网下载
+        # 加载模型（只执行一次）
+        print(f"[EmbeddingService] 初始化SigLIP常驻服务...")
+        self._load_model(config)
+
+        # Text embeddings 缓存: hash(templates) -> np.ndarray
+        self._text_cache: Dict[str, np.ndarray] = {}
+        self._cache_lock = threading.Lock()
+
+        print(f"[EmbeddingService] 常驻服务初始化完成，模型已加载到 {self.device}")
+
+    def _load_model(self, config: EmbeddingConfig):
+        """加载SigLIP模型"""
         try:
-            print(f"[EmbeddingIndexer] 尝试从本地缓存加载模型: {config.model_name}")
+            print(f"[EmbeddingService] 尝试从本地缓存加载模型: {config.model_name}")
             self.processor = AutoProcessor.from_pretrained(
                 config.model_name,
                 trust_remote_code=True,
-                local_files_only=True  # 优先使用本地缓存
+                local_files_only=True
             )
             self.model = AutoModel.from_pretrained(
                 config.model_name,
                 trust_remote_code=True,
-                local_files_only=True  # 优先使用本地缓存
+                local_files_only=True
             )
-            print(f"[EmbeddingIndexer] OK - Loaded from local cache")
-        except Exception as e:
-            print(f"[EmbeddingIndexer] 本地缓存不存在，开始联网下载模型...")
+            print(f"[EmbeddingService] OK - Loaded from local cache")
+        except Exception:
+            print(f"[EmbeddingService] 本地缓存不存在，开始联网下载模型...")
             self.processor = AutoProcessor.from_pretrained(
                 config.model_name,
                 trust_remote_code=True
@@ -55,128 +75,90 @@ class EmbeddingIndexer:
                 config.model_name,
                 trust_remote_code=True
             )
-            print(f"[EmbeddingIndexer] OK - Model downloaded and cached")
+            print(f"[EmbeddingService] OK - Model downloaded and cached")
 
         self.model.to(self.device)
         self.model.eval()
 
-        # 验证模型实际所在设备
+        # 验证模型设备
         try:
             first_param = next(self.model.parameters())
             actual_device = first_param.device
-            print(f"[EmbeddingIndexer] Model actual device: {actual_device}")
+            print(f"[EmbeddingService] Model actual device: {actual_device}")
             if "cuda" in str(actual_device):
-                print(f"[EmbeddingIndexer] >>> GPU acceleration ENABLED!")
-            else:
-                print(f"[EmbeddingIndexer] WARNING: Model running on CPU, GPU not used")
+                print(f"[EmbeddingService] >>> GPU acceleration ENABLED!")
         except Exception as e:
-            print(f"[EmbeddingIndexer] WARNING: Cannot verify model device: {e}")
-
-        self.vector_dim: Optional[int] = None
-        self.embeddings: List[np.ndarray] = []
-        self.metadata: List[Dict] = []
-        self.index = None
+            print(f"[EmbeddingService] WARNING: Cannot verify model device: {e}")
 
     def _select_device(self, device_pref: str) -> str:
-        print(f"[EmbeddingIndexer] Device preference: {device_pref}")
-        print(f"[EmbeddingIndexer] PyTorch version: {torch.__version__}")
-        print(f"[EmbeddingIndexer] CUDA available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"[EmbeddingIndexer] CUDA device count: {torch.cuda.device_count()}")
-            print(f"[EmbeddingIndexer] CUDA device name: {torch.cuda.get_device_name(0)}")
-
+        """选择计算设备"""
         if device_pref == "auto":
             try:
-                if torch.cuda.is_available():
-                    print("[EmbeddingIndexer] >>> Selected device: cuda (GPU)")
+                print(f"[EmbeddingService] 检测CUDA可用性...")
+                cuda_available = torch.cuda.is_available()
+                print(f"[EmbeddingService] torch.cuda.is_available() = {cuda_available}")
+
+                if cuda_available:
+                    print(f"[EmbeddingService] 选择设备: cuda")
                     return "cuda"
-                if torch.backends.mps.is_available():  # type: ignore
-                    print("[EmbeddingIndexer] >>> Selected device: mps")
+
+                print(f"[EmbeddingService] 检测MPS可用性...")
+                if torch.backends.mps.is_available():
+                    print(f"[EmbeddingService] 选择设备: mps")
                     return "mps"
+
             except Exception as e:
-                print(f"[EmbeddingIndexer] WARNING: Device detection error: {e}")
-            print("[EmbeddingIndexer] WARNING: Fallback to CPU")
+                # 关键修复：打印异常信息（避免特殊字符GBK编码问题）
+                try:
+                    print(f"[EmbeddingService] 设备检测异常: {type(e).__name__}: {str(e)}")
+                except Exception:
+                    print(f"[EmbeddingService] 设备检测异常（无法打印详情）")
+
+            print(f"[EmbeddingService] 回退到CPU")
             return "cpu"
-        print(f"[EmbeddingIndexer] >>> Using specified device: {device_pref}")
+
+        print(f"[EmbeddingService] 使用指定设备: {device_pref}")
         return device_pref
 
-    def encode_images(self, image_paths: List[str]) -> np.ndarray:
-        total_start = time.time()
-        num_images = len(image_paths)
-        print(f"[SigLIP] === Image Encoding START === ({num_images} images, batch_size={self.config.batch_size})")
+    def _compute_cache_key(self, texts: List[str]) -> str:
+        """计算模板列表的缓存key"""
+        content = "|".join(sorted(texts))
+        return hashlib.md5(content.encode('utf-8')).hexdigest()
 
-        # Step 1: 磁盘 I/O + PIL 预处理
-        io_start = time.time()
-        batches = []
-        for path in image_paths:
-            img = Image.open(path).convert("RGB")
-            batches.append(img)
-        io_time = time.time() - io_start
-        print(f"[SigLIP] Step 1/3: Disk I/O + PIL preprocess: {io_time:.2f}s ({num_images} images, {io_time/max(1,num_images)*1000:.1f}ms/img)")
+    def encode_texts_cached(self, texts: List[str]) -> np.ndarray:
+        """编码文本（带缓存）"""
+        if not texts:
+            return np.zeros((0, 1), dtype=np.float32)
 
+        cache_key = self._compute_cache_key(texts)
+
+        with self._cache_lock:
+            if cache_key in self._text_cache:
+                print(f"[EmbeddingService] Text embeddings 缓存命中! (key={cache_key[:8]}..., {len(texts)} templates)")
+                return self._text_cache[cache_key].copy()
+
+        # 缓存未命中，计算embeddings
+        print(f"[EmbeddingService] Text embeddings 缓存未命中，开始编码 {len(texts)} 个模板...")
+        embeddings = self._encode_texts_impl(texts)
+
+        with self._cache_lock:
+            self._text_cache[cache_key] = embeddings.copy()
+            print(f"[EmbeddingService] Text embeddings 已缓存 (key={cache_key[:8]}..., 当前缓存数: {len(self._text_cache)})")
+
+        return embeddings
+
+    def _encode_texts_impl(self, texts: List[str]) -> np.ndarray:
+        """实际的文本编码逻辑"""
         outputs = []
         batch_size = max(1, self.config.batch_size)
-        num_batches = (len(batches) + batch_size - 1) // batch_size
-        # 加固：稳健的 CUDA 检测（支持 "cuda" 和 "cuda:0" 等形式）
-        use_amp = "cuda" in str(self.device)
-
-        # Step 2: SigLIP GPU 编码
-        gpu_start = time.time()
-        print(f"[SigLIP] Step 2/3: GPU encoding start ({num_batches} batches, device={self.device})...")
-
-        for batch_idx, start in enumerate(range(0, len(batches), batch_size)):
-            batch_start = time.time()
-            batch_imgs = batches[start : start + batch_size]
-
-            # Processor 预处理（CPU）
-            preproc_start = time.time()
-            inputs = self.processor(images=batch_imgs, return_tensors="pt").to(self.device)
-            preproc_time = time.time() - preproc_start
-
-            # GPU 推理
-            infer_start = time.time()
-            with torch.inference_mode():
-                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
-                    image_features = self.model.get_image_features(**inputs)
-            infer_time = time.time() - infer_start
-
-            # 加固：归一化前转 FP32，保证排序稳定性
-            image_features = image_features.float()
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            # 验证：检查 NaN/Inf
-            if not torch.isfinite(image_features).all():
-                print("[EmbeddingIndexer] WARNING: encode_images output contains NaN/Inf!")
-            outputs.append(image_features.cpu().numpy())
-
-            batch_time = time.time() - batch_start
-            print(f"[SigLIP]   Batch {batch_idx+1}/{num_batches}: {len(batch_imgs)} imgs, preproc={preproc_time:.2f}s, GPU={infer_time:.2f}s, total={batch_time:.2f}s")
-
-        gpu_time = time.time() - gpu_start
-        print(f"[SigLIP] Step 2/3: GPU encoding done: {gpu_time:.2f}s")
-
-        # Step 3: 结果汇总
-        total_time = time.time() - total_start
-        print(f"[SigLIP] === Image Encoding END === Total: {total_time:.2f}s (I/O: {io_time:.2f}s, GPU: {gpu_time:.2f}s)")
-
-        return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, 1), dtype=np.float32)
-
-    def encode_texts(self, texts: List[str]) -> np.ndarray:
-        total_start = time.time()
-        num_texts = len(texts)
-        print(f"[SigLIP] === Text Encoding START === ({num_texts} templates)")
-
-        outputs = []
-        batch_size = max(1, self.config.batch_size)
-        num_batches = (num_texts + batch_size - 1) // batch_size
         max_len = 64
         try:
             max_len = int(getattr(self.model.config.text_config, "max_position_embeddings", max_len))
         except Exception:
             pass
-        # 加固：稳健的 CUDA 检测（支持 "cuda" 和 "cuda:0" 等形式）
         use_amp = "cuda" in str(self.device)
 
-        for batch_idx, start in enumerate(range(0, len(texts), batch_size)):
+        for start in range(0, len(texts), batch_size):
             batch_texts = texts[start : start + batch_size]
             inputs = self.processor(
                 text=batch_texts,
@@ -185,33 +167,176 @@ class EmbeddingIndexer:
                 max_length=max_len,
                 return_tensors="pt",
             ).to(self.device)
-            # 优化：inference_mode + autocast（官方推荐写法）
+
             with torch.inference_mode():
                 with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
                     text_features = self.model.get_text_features(**inputs)
-            # 加固：归一化前转 FP32，保证排序稳定性
+
             text_features = text_features.float()
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            # 验证：检查 NaN/Inf
-            if not torch.isfinite(text_features).all():
-                print("[EmbeddingIndexer] WARNING: encode_texts output contains NaN/Inf!")
             outputs.append(text_features.cpu().numpy())
-
-        total_time = time.time() - total_start
-        print(f"[SigLIP] === Text Encoding END === Total: {total_time:.2f}s ({num_texts} templates, {num_batches} batches)")
 
         return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, 1), dtype=np.float32)
 
+    def encode_images(self, images: List[Image.Image]) -> np.ndarray:
+        """编码图像（不缓存，每次都是新图像）"""
+        if not images:
+            return np.zeros((0, 1), dtype=np.float32)
+
+        outputs = []
+        batch_size = max(1, self.config.batch_size)
+        use_amp = "cuda" in str(self.device)
+
+        for start in range(0, len(images), batch_size):
+            batch_imgs = images[start : start + batch_size]
+            inputs = self.processor(images=batch_imgs, return_tensors="pt").to(self.device)
+
+            with torch.inference_mode():
+                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                    image_features = self.model.get_image_features(**inputs)
+
+            image_features = image_features.float()
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            outputs.append(image_features.cpu().numpy())
+
+        return np.concatenate(outputs, axis=0) if outputs else np.zeros((0, 1), dtype=np.float32)
+
+    def clear_text_cache(self):
+        """清空text embeddings缓存"""
+        with self._cache_lock:
+            self._text_cache.clear()
+            print("[EmbeddingService] Text embeddings 缓存已清空")
+
+
+def get_embedding_service(config: EmbeddingConfig = None) -> EmbeddingService:
+    """获取EmbeddingService单例"""
+    global _embedding_service
+
+    with _embedding_service_lock:
+        if _embedding_service is None:
+            if config is None:
+                config = EmbeddingConfig()
+            _embedding_service = EmbeddingService(config)
+        return _embedding_service
+
+
+def cleanup_embedding_service():
+    """清理EmbeddingService单例（释放GPU显存和缓存）"""
+    global _embedding_service
+
+    with _embedding_service_lock:
+        if _embedding_service is not None:
+            print("[EmbeddingService] 开始清理常驻服务...")
+
+            # 清空text缓存
+            _embedding_service.clear_text_cache()
+
+            # 释放模型
+            try:
+                del _embedding_service.model
+                del _embedding_service.processor
+            except Exception as e:
+                print(f"[EmbeddingService] 模型释放警告: {e}")
+
+            # 清理CUDA缓存
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    print("[EmbeddingService] CUDA缓存已清理")
+            except Exception as e:
+                print(f"[EmbeddingService] CUDA清理警告: {e}")
+
+            _embedding_service = None
+            print("[EmbeddingService] 常驻服务已清理完成")
+
+
+class EmbeddingIndexer:
+    """
+    SigLIP 编码与向量索引。
+    - 使用 EmbeddingService 单例（模型常驻，避免重复加载）
+    - 支持 faiss 内存索引，缺省回退到 numpy 余弦。
+    """
+
+    def __init__(self, config: EmbeddingConfig):
+        self.config = config
+
+        # 使用单例服务（模型常驻，只加载一次）
+        self._service = get_embedding_service(config)
+        self.device = self._service.device
+
+        print(f"[EmbeddingIndexer] 使用常驻服务 (device={self.device})")
+
+        self.vector_dim: Optional[int] = None
+        self.embeddings: List[np.ndarray] = []
+        self.metadata: List[Dict] = []
+        self.index = None
+
+    def encode_images(self, image_paths: List[str]) -> np.ndarray:
+        """编码图像（使用常驻服务）"""
+        total_start = time.time()
+        num_images = len(image_paths)
+        print(f"[SigLIP] === Image Encoding START === ({num_images} images)")
+
+        # Step 1: 磁盘 I/O + PIL 预处理
+        io_start = time.time()
+        images = []
+        for path in image_paths:
+            img = Image.open(path).convert("RGB")
+            images.append(img)
+        io_time = time.time() - io_start
+        print(f"[SigLIP] Step 1/2: Disk I/O: {io_time:.2f}s ({num_images} images)")
+
+        # Step 2: 使用常驻服务编码
+        gpu_start = time.time()
+        embeddings = self._service.encode_images(images)
+        gpu_time = time.time() - gpu_start
+
+        total_time = time.time() - total_start
+        print(f"[SigLIP] === Image Encoding END === Total: {total_time:.2f}s (I/O: {io_time:.2f}s, GPU: {gpu_time:.2f}s)")
+
+        return embeddings
+
+    def encode_texts(self, texts: List[str]) -> np.ndarray:
+        """编码文本（使用常驻服务 + 缓存）"""
+        total_start = time.time()
+        num_texts = len(texts)
+        print(f"[SigLIP] === Text Encoding START === ({num_texts} templates)")
+
+        # 使用常驻服务的缓存功能
+        embeddings = self._service.encode_texts_cached(texts)
+
+        total_time = time.time() - total_start
+        print(f"[SigLIP] === Text Encoding END === Total: {total_time:.2f}s ({num_texts} templates)")
+
+        return embeddings
+
     def add_frame_embeddings(self, records: List[Dict]) -> List[int]:
         """
-        records: [{"image_path": str, "metadata": {...}}]
+        records: [{"image_path": str, "image": PIL.Image (可选), "metadata": {...}}]
         返回添加后的内部 ID 列表。
+
+        优化：优先使用内存图像(image字段)，避免重复磁盘I/O
         """
         if not records:
             return []
 
-        image_paths = [r["image_path"] for r in records]
-        embeddings = self.encode_images(image_paths).astype(np.float32)
+        # 收集图像：优先使用内存图像，否则从路径读取
+        images = []
+        from_memory = 0
+        from_disk = 0
+        for r in records:
+            if "image" in r and r["image"] is not None:
+                images.append(r["image"])
+                from_memory += 1
+            else:
+                img = Image.open(r["image_path"]).convert("RGB")
+                images.append(img)
+                from_disk += 1
+
+        print(f"[EmbeddingIndexer] 图像来源: 内存={from_memory}, 磁盘={from_disk}")
+
+        # 直接使用PIL Image列表编码
+        embeddings = self._service.encode_images(images).astype(np.float32)
         if embeddings.size == 0:
             return []
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from typing import Dict, List, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -188,11 +189,130 @@ def cut_clip_ffmpeg(input_path: str, start: float, end: float, output_path: str)
 
 
 def sample_frames_from_clip(
+    video_path: str, start: float, end: float, num_frames: int,
+    min_frames_required: int = 6,
+    max_retry: int = 2,
+) -> List[Tuple[float, "cv2.Mat"]]:
+    """
+    使用FFmpeg批量抽帧（比逐帧seek更高效）。
+    返回 [(timestamp, frame_bgr)]。
+
+    [B修复] 添加ensure_min_frames兜底：
+    - 如果解码帧数不足，自动提高fps重试
+    - 最多重试max_retry次
+
+    Args:
+        video_path: 视频路径
+        start: 开始时间（秒）
+        end: 结束时间（秒）
+        num_frames: 请求帧数
+        min_frames_required: 最低帧数要求（默认6）
+        max_retry: 最大重试次数
+
+    Returns:
+        [(timestamp, frame_bgr), ...]
+    """
+    if num_frames <= 0:
+        return []
+
+    duration = max(0.1, end - start)
+
+    # 计算采样时间点
+    if num_frames == 1:
+        positions = [start + duration / 2]  # 单帧取中间
+    else:
+        positions = [start + i * duration / (num_frames - 1) for i in range(num_frames)]
+
+    retry_count = 0
+    decoded_n = 0
+    final_fps = 0.0
+
+    # [B修复] 重试循环
+    while retry_count <= max_retry:
+        # 使用临时目录存储抽取的帧
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_pattern = os.path.join(tmp_dir, "frame_%04d.jpg")
+
+            # 计算目标fps：确保在duration内能抽取num_frames帧
+            # 重试时提高fps
+            base_fps = num_frames / duration if duration > 0 else num_frames
+            fps_multiplier = 1.0 + retry_count * 0.5  # 每次重试提高50%
+            min_fps = 2.0 * fps_multiplier
+            final_fps = max(min_fps, base_fps * fps_multiplier)
+
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss", f"{start:.3f}",
+                "-i", video_path,
+                "-t", f"{duration:.3f}",
+                "-vf", f"fps={final_fps:.6f}",
+                "-frames:v", str(int(num_frames * fps_multiplier)),  # 请求更多帧
+                "-q:v", "2",  # 高质量JPEG
+                output_pattern,
+            ]
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=os.name == "nt",
+                    timeout=60
+                )
+            except subprocess.TimeoutExpired:
+                print(f"[clip_sampler] FFmpeg抽帧超时，回退到OpenCV")
+                samples = _sample_frames_opencv_fallback(video_path, start, end, num_frames)
+                print(f"[clip_sampler] 抽帧统计: requested={num_frames}, decoded={len(samples)}, retry={retry_count}, fps={final_fps:.2f}")
+                return samples
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr.decode('utf-8', errors='ignore') if e.stderr else ''
+                print(f"[clip_sampler] FFmpeg抽帧失败: {stderr[:200]}，回退到OpenCV")
+                samples = _sample_frames_opencv_fallback(video_path, start, end, num_frames)
+                print(f"[clip_sampler] 抽帧统计: requested={num_frames}, decoded={len(samples)}, retry={retry_count}, fps={final_fps:.2f}")
+                return samples
+            except Exception as e:
+                print(f"[clip_sampler] FFmpeg抽帧异常: {e}，回退到OpenCV")
+                samples = _sample_frames_opencv_fallback(video_path, start, end, num_frames)
+                print(f"[clip_sampler] 抽帧统计: requested={num_frames}, decoded={len(samples)}, retry={retry_count}, fps={final_fps:.2f}")
+                return samples
+
+            # 读取提取的帧
+            samples = []
+            frame_files = sorted([f for f in os.listdir(tmp_dir) if f.endswith('.jpg')])
+            for i, fname in enumerate(frame_files[:num_frames]):  # 最多取num_frames帧
+                frame_path = os.path.join(tmp_dir, fname)
+                frame = cv2.imread(frame_path)
+                if frame is not None:
+                    ts = positions[min(i, len(positions) - 1)]
+                    samples.append((ts, frame))
+
+            decoded_n = len(samples)
+
+            # [B修复] 检查是否满足最低帧数要求
+            if decoded_n >= min(min_frames_required, num_frames):
+                print(f"[clip_sampler] 抽帧成功: requested={num_frames}, decoded={decoded_n}, retry={retry_count}, fps={final_fps:.2f}")
+                return samples
+
+            # 帧数不足，准备重试
+            retry_count += 1
+            if retry_count <= max_retry:
+                print(f"[clip_sampler] ⚠ 帧数不足({decoded_n}<{min_frames_required})，重试#{retry_count} (提高fps)")
+
+    # 所有重试都失败，回退到OpenCV
+    print(f"[clip_sampler] 重试{max_retry}次仍不足，回退到OpenCV")
+    samples = _sample_frames_opencv_fallback(video_path, start, end, num_frames)
+    print(f"[clip_sampler] 抽帧统计: requested={num_frames}, decoded={len(samples)}, retry={retry_count}, fps={final_fps:.2f}")
+    return samples
+
+
+def _sample_frames_opencv_fallback(
     video_path: str, start: float, end: float, num_frames: int
 ) -> List[Tuple[float, "cv2.Mat"]]:
     """
-    从视频区间均匀采样若干帧。
-    返回 [(timestamp, frame_bgr)]。
+    OpenCV回退方法（FFmpeg失败时使用）。
+    逐帧seek，效率较低但兼容性好。
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -210,4 +330,6 @@ def sample_frames_from_clip(
         if ret:
             samples.append((ts, frame))
     cap.release()
+
+    print(f"[clip_sampler] OpenCV回退抽帧完成: {len(samples)}帧")
     return samples

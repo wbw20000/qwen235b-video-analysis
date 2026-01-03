@@ -1117,6 +1117,19 @@
                     </div>
                 </div>
 
+                <!-- 下载方式选择 -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="downloadMethod">下载方式:</label>
+                        <select id="downloadMethod" name="download_method">
+                            <option value="auto" selected>自动 (先RTSP后HTTP)</option>
+                            <option value="rtsp">仅RTSP (快速)</option>
+                            <option value="http">仅HTTP轮询 (兼容)</option>
+                        </select>
+                        <small id="downloadMethodHint">RTSP更快，HTTP兼容性更好</small>
+                    </div>
+                </div>
+
                 <!-- 路口-摄像头级联选择（单点模式） -->
                 <div class="form-row" id="singleSelectRow">
                     <div class="form-group">
@@ -1126,12 +1139,24 @@
                         </select>
                         <small>选择要回溯的路口</small>
                     </div>
+                    <!-- HTTP轮询模式的摄像头选择（支持多选） -->
                     <div class="form-group" id="cameraSelectGroup">
-                        <label for="cameraSelect">选择摄像头:</label>
-                        <select id="cameraSelect" name="channel_num" disabled>
+                        <label for="cameraSelect">选择摄像头 <span style="color: var(--text-muted);">(可多选)</span>:</label>
+                        <select id="cameraSelect" name="channel_nums" multiple size="5" disabled style="min-height: 120px;">
+                            <option value="" disabled>-- 请先选择路口 --</option>
+                        </select>
+                        <small id="cameraHint">
+                            DJ=电警, KK=卡口, 全景=全景摄像头 | 按住 Ctrl 多选
+                            <span id="selectedCameraCount" style="margin-left: 10px; color: var(--primary);">已选: 0</span>
+                        </small>
+                    </div>
+                    <!-- RTSP模式的设备选择 -->
+                    <div class="form-group" id="rtspDeviceGroup" style="display: none;">
+                        <label for="rtspDeviceSelect">选择设备:</label>
+                        <select id="rtspDeviceSelect" name="device_id" disabled>
                             <option value="">-- 请先选择路口 --</option>
                         </select>
-                        <small id="cameraHint">DJ=电警, KK=卡口, 全景=全景摄像头</small>
+                        <small id="rtspDeviceHint">选择RTSP设备 (DJ=全景, KK=抓拍)</small>
                     </div>
                 </div>
 
@@ -1436,6 +1461,10 @@
         const historyForm = document.getElementById('historyForm');
         const roadSelect = document.getElementById('roadSelect');
         const cameraSelect = document.getElementById('cameraSelect');
+        const downloadMethodSelect = document.getElementById('downloadMethod');
+        const rtspDeviceSelect = document.getElementById('rtspDeviceSelect');
+        const cameraSelectGroup = document.getElementById('cameraSelectGroup');
+        const rtspDeviceGroup = document.getElementById('rtspDeviceGroup');
         const startDateInput = document.getElementById('startDateInput');
         const startTimeInput = document.getElementById('startTimeInput');
         const endDateInput = document.getElementById('endDateInput');
@@ -1612,19 +1641,80 @@
             return selected;
         }
 
-        // 路口选择变化时加载摄像头
-        roadSelect.addEventListener('change', async function() {
-            const roadId = this.value;
-            cameraSelect.innerHTML = '<option value="">-- 加载中... --</option>';
-            cameraSelect.disabled = true;
-
-            if (!roadId) {
-                cameraSelect.innerHTML = '<option value="">-- 请先选择路口 --</option>';
-                return;
+        // 下载方式切换
+        downloadMethodSelect.addEventListener('change', function() {
+            const method = this.value;
+            updateDeviceSelectionUI(method);
+            // 重新加载设备列表
+            const roadId = roadSelect.value;
+            if (roadId) {
+                loadDevicesForRoad(roadId);
             }
+        });
+
+        // 更新设备选择UI（根据下载方式）
+        function updateDeviceSelectionUI(method) {
+            if (method === 'http') {
+                // HTTP轮询模式：显示摄像头选择
+                cameraSelectGroup.style.display = 'block';
+                rtspDeviceGroup.style.display = 'none';
+                document.getElementById('downloadMethodHint').textContent = 'HTTP轮询模式：从云端服务器获取视频URL';
+            } else if (method === 'rtsp') {
+                // RTSP模式：显示设备选择
+                cameraSelectGroup.style.display = 'none';
+                rtspDeviceGroup.style.display = 'block';
+                document.getElementById('downloadMethodHint').textContent = 'RTSP模式：直接从摄像头流录制';
+            } else {
+                // 自动模式：优先显示RTSP设备选择
+                cameraSelectGroup.style.display = 'none';
+                rtspDeviceGroup.style.display = 'block';
+                document.getElementById('downloadMethodHint').textContent = '自动模式：先尝试RTSP，失败后回退HTTP';
+            }
+        }
+
+        // 加载RTSP设备列表
+        async function loadRtspDevices(roadId) {
+            rtspDeviceSelect.innerHTML = '<option value="">-- 加载中... --</option>';
+            rtspDeviceSelect.disabled = true;
 
             try {
-                // 获取日期和时间（用于API调用，使用开始日期）
+                const response = await fetch(`/api/history/rtsp-devices/${roadId}`);
+                const data = await response.json();
+
+                rtspDeviceSelect.innerHTML = '<option value="">-- 选择设备 --</option>';
+
+                if (data.devices && data.devices.length > 0) {
+                    data.devices.forEach(device => {
+                        const option = document.createElement('option');
+                        // 存储设备类型和索引
+                        option.value = `${device.device_cate}:${device.index}`;
+                        option.dataset.deviceId = device.device_id;
+                        option.dataset.deviceCate = device.device_cate;
+                        option.dataset.deviceIndex = device.index;
+                        const icon = device.is_panoramic ? '📷' : '📸';
+                        option.textContent = `${icon} ${device.device_id} (${device.device_cate_str})`;
+                        rtspDeviceSelect.appendChild(option);
+                    });
+                    rtspDeviceSelect.disabled = false;
+                    document.getElementById('rtspDeviceHint').textContent =
+                        `DJ=${data.dj_count}个全景, KK=${data.kk_count}个抓拍`;
+                } else {
+                    rtspDeviceSelect.innerHTML = '<option value="">-- 无可用设备 --</option>';
+                    document.getElementById('rtspDeviceHint').textContent = '该路口无RTSP设备映射';
+                }
+            } catch (err) {
+                console.error('加载RTSP设备列表失败:', err);
+                rtspDeviceSelect.innerHTML = '<option value="">-- 加载失败 --</option>';
+            }
+        }
+
+        // 加载HTTP摄像头列表（支持多选）
+        async function loadHttpCameras(roadId) {
+            cameraSelect.innerHTML = '<option value="" disabled>-- 加载中... --</option>';
+            cameraSelect.disabled = true;
+            updateSelectedCameraCount();
+
+            try {
                 const date = startDateInput.value || new Date().toISOString().split('T')[0];
                 const startTime = startTimeInput.value || '00:00';
                 const endTime = endTimeInput.value || '23:59';
@@ -1632,24 +1722,66 @@
                 const response = await fetch(`/api/history/cameras/${roadId}?date=${date}&start_time=${startTime}&end_time=${endTime}`);
                 const data = await response.json();
 
-                cameraSelect.innerHTML = '<option value="">-- 选择摄像头 --</option>';
+                cameraSelect.innerHTML = '';  // 多选模式不需要空选项
 
                 if (data.cameras && data.cameras.length > 0) {
                     data.cameras.forEach(camera => {
                         const option = document.createElement('option');
                         option.value = camera.channel_num;
                         const typeStr = camera.camera_type_str || (camera.camera_type === 0 ? '抓拍' : '全景');
-                        option.textContent = `通道${camera.channel_num} (${typeStr})`;
+                        option.textContent = `通道${camera.channel_num.slice(-4)} (${typeStr})`;  // 只显示后4位
                         cameraSelect.appendChild(option);
                     });
                     cameraSelect.disabled = false;
                 } else {
-                    cameraSelect.innerHTML = '<option value="">-- 无可用摄像头 --</option>';
+                    cameraSelect.innerHTML = '<option value="" disabled>-- 无可用摄像头 --</option>';
                 }
             } catch (err) {
                 console.error('加载摄像头列表失败:', err);
-                cameraSelect.innerHTML = '<option value="">-- 加载失败 --</option>';
+                cameraSelect.innerHTML = '<option value="" disabled>-- 加载失败 --</option>';
             }
+            updateSelectedCameraCount();
+        }
+
+        // 更新已选摄像头数量显示
+        function updateSelectedCameraCount() {
+            const count = Array.from(cameraSelect.selectedOptions).filter(opt => opt.value).length;
+            const countSpan = document.getElementById('selectedCameraCount');
+            if (countSpan) {
+                countSpan.textContent = `已选: ${count}`;
+                countSpan.style.color = count > 0 ? 'var(--success)' : 'var(--text-muted)';
+            }
+        }
+
+        // 摄像头选择变化时更新数量
+        cameraSelect.addEventListener('change', updateSelectedCameraCount);
+
+        // 根据下载方式加载设备/摄像头
+        function loadDevicesForRoad(roadId) {
+            const method = downloadMethodSelect.value;
+            if (method === 'http') {
+                loadHttpCameras(roadId);
+            } else {
+                // auto 或 rtsp 模式都加载RTSP设备
+                loadRtspDevices(roadId);
+            }
+        }
+
+        // 路口选择变化时加载设备/摄像头
+        roadSelect.addEventListener('change', async function() {
+            const roadId = this.value;
+
+            // 重置两个选择框
+            cameraSelect.innerHTML = '<option value="">-- 请先选择路口 --</option>';
+            cameraSelect.disabled = true;
+            rtspDeviceSelect.innerHTML = '<option value="">-- 请先选择路口 --</option>';
+            rtspDeviceSelect.disabled = true;
+
+            if (!roadId) {
+                return;
+            }
+
+            loadDevicesForRoad(roadId);
         });
 
         // 高级配置切换
@@ -1715,21 +1847,54 @@
             if (traverseMode === 'single') {
                 // 单点分析模式
                 const roadId = roadSelect.value;
-                const channelNum = cameraSelect.value;
+                const downloadMethod = downloadMethodSelect.value;
 
                 if (!roadId) {
                     showError('请选择路口');
                     return;
                 }
-                if (!channelNum) {
-                    showError('请选择摄像头');
-                    return;
+
+                // 根据下载方式验证和获取设备参数
+                let channelNums = [];  // 多摄像头数组
+                let deviceCate = 'DJ';
+                let deviceIndex = 0;
+
+                if (downloadMethod === 'http') {
+                    // HTTP轮询模式需要选择摄像头（支持多选）
+                    channelNums = Array.from(cameraSelect.selectedOptions)
+                        .filter(opt => opt.value)
+                        .map(opt => opt.value);
+                    if (channelNums.length === 0) {
+                        showError('请至少选择一个摄像头');
+                        return;
+                    }
+                } else if (downloadMethod === 'rtsp' || downloadMethod === 'auto') {
+                    // RTSP或自动模式需要设备选择
+                    const rtspDevice = rtspDeviceSelect.value;
+                    if (rtspDevice) {
+                        // 解析设备选择 (格式: "DJ:0" 或 "KK:1")
+                        const parts = rtspDevice.split(':');
+                        if (parts.length === 2) {
+                            deviceCate = parts[0];
+                            deviceIndex = parseInt(parts[1]) || 0;
+                        }
+                    }
+                    // 自动模式下也需要channel_nums作为HTTP回退
+                    if (downloadMethod === 'auto') {
+                        channelNums = Array.from(cameraSelect.selectedOptions)
+                            .filter(opt => opt.value)
+                            .map(opt => opt.value);
+                        // 自动模式下摄像头可选，但有警告
+                        if (channelNums.length === 0) {
+                            console.log('自动模式下未选择HTTP摄像头，RTSP失败时无法回退');
+                        }
+                    }
                 }
 
-                // 构建请求数据（支持跨日期）
+                // 构建请求数据（支持跨日期和多摄像头）
                 const requestData = {
                     road_id: roadId,
-                    channel_num: channelNum,
+                    channel_nums: channelNums,  // 多摄像头数组
                     start_date: startDate,
                     start_time: startTime,
                     end_date: endDate,
@@ -1739,7 +1904,10 @@
                     model: document.getElementById('model').value,
                     segment_duration: parseInt(document.getElementById('segmentDuration').value) * 60,
                     download_retry_count: parseInt(document.getElementById('downloadRetry').value),
-                    analyze_timeout: parseInt(document.getElementById('analyzeTimeout').value)
+                    analyze_timeout: parseInt(document.getElementById('analyzeTimeout').value),
+                    download_method: downloadMethod,
+                    device_cate: deviceCate,
+                    device_index: deviceIndex
                 };
 
                 // 开始单点任务
@@ -1757,6 +1925,21 @@
                 }
                 // time_traverse 模式 roadIds 为空，后端会遍历所有路口
 
+                // 获取下载方式参数
+                const downloadMethod = downloadMethodSelect.value;
+                let deviceCate = 'DJ';
+                let deviceIndex = 0;
+
+                // 批量模式下如果有RTSP设备选择，使用选择的设备
+                const rtspDevice = rtspDeviceSelect.value;
+                if (rtspDevice && (downloadMethod === 'rtsp' || downloadMethod === 'auto')) {
+                    const parts = rtspDevice.split(':');
+                    if (parts.length === 2) {
+                        deviceCate = parts[0];
+                        deviceIndex = parseInt(parts[1]) || 0;
+                    }
+                }
+
                 // 构建批量请求数据（支持跨日期）
                 const batchRequestData = {
                     mode: traverseMode,
@@ -1768,7 +1951,10 @@
                     model: document.getElementById('model').value,
                     analysis_mode: analysisMode,
                     violation_types: violationTypes,
-                    segment_duration: parseInt(document.getElementById('segmentDuration').value) * 60
+                    segment_duration: parseInt(document.getElementById('segmentDuration').value) * 60,
+                    download_method: downloadMethod,
+                    device_cate: deviceCate,
+                    device_index: deviceIndex
                 };
 
                 // 开始批量任务

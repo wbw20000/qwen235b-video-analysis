@@ -82,6 +82,11 @@ class VLMConfig:
     clip_score_threshold: float = 0.35  # clip_score低于此值跳过VLM调用
     skip_low_score_vlm: bool = True     # 是否启用阈值过滤
 
+    # P1-2优化：三档判决逻辑
+    uncertain_threshold: float = 0.25   # confidence < uncertain_threshold → NO
+                                        # uncertain_threshold <= confidence < clip_score_threshold → UNCERTAIN
+                                        # confidence >= clip_score_threshold → YES (if verdict=YES)
+
     # P0优化：图像压缩减少传输（当前已关闭，发送原始标注图片）
     image_max_width: int = 960          # 图像最大宽度（像素）
     image_quality: int = 70             # JPEG压缩质量（1-100）
@@ -184,6 +189,9 @@ class VLMRetentionConfig:
     # 保留状态
     needs_review_label: str = "NEEDS_REVIEW"      # 保留候选的标签
 
+    # NO置信度阈值：VLM=NO且置信度>=此值时，不可被覆盖，尊重VLM判断
+    no_confidence_threshold: float = 0.6          # 高置信度NO的阈值
+
 
 @dataclass
 class FileEventLocatorConfig:
@@ -210,6 +218,176 @@ class FileEventLocatorConfig:
     distance_drop_threshold: float = 0.3          # 距离突降阈值(相对值)
     velocity_change_threshold: float = 0.4        # 速度变化阈值(相对值)
     iou_contact_threshold: float = 0.05           # IoU接触阈值
+
+
+@dataclass
+class ProgressiveVLMConfig:
+    """渐进式VLM配置 v2 - 自适应帧预算与升级策略
+
+    目标：在不引入误报（FPR不升）的前提下，提高短FN的召回。
+    核心改动：VLM输入使用"无框原始帧"+"文本化检测/轨迹元数据"。
+
+    v2改进：
+    - 自适应帧预算：根据clip时长调整S1帧数
+    - 事件加帧：在高信号帧附近增加采样
+    - ROI证据裁剪：提取交互热点
+    """
+
+    # 功能开关
+    enabled: bool = True                          # 是否启用渐进式VLM策略
+    version: str = "v2"                           # v1=固定帧数, v2=自适应帧数
+
+    # ===== v2自适应帧预算 =====
+    # S1帧数根据clip时长自适应调整
+    s1_frames_short: int = 12                     # ≤12s短clip的S1帧数
+    s1_frames_mid: int = 10                       # 12-30s中等clip的S1帧数
+    s1_frames_long: int = 8                       # >30s长clip的S1帧数
+
+    # clip时长分界点（秒）
+    clip_duration_short: float = 12.0             # 短clip阈值
+    clip_duration_mid: float = 30.0               # 中等clip阈值
+
+    # S2帧预算（升级后使用）- v2自适应
+    s2_frames_short: int = 18                     # ≤12s短clip的S2帧数
+    s2_frames_mid: int = 15                       # 12-30s中等clip的S2帧数
+    s2_frames_long: int = 12                      # >30s长clip的S2帧数
+    s2_frames_min: int = 12                       # S2最小帧数（兜底）
+    s2_frames_max: int = 24                       # S2最大帧数（上限）
+
+    # ===== v1兼容配置（当version=v1时使用）=====
+    fast_frames_min: int = 4                      # S1快速验证最小帧数
+    fast_frames_max: int = 6                      # S1快速验证最大帧数
+    escalated_frames_min: int = 12                # S2升级验证最小帧数
+    escalated_frames_max: int = 16                # S2升级验证最大帧数
+
+    # ===== 事件加帧配置 =====
+    event_boost_enabled: bool = True              # 是否启用事件加帧
+    event_boost_frames: int = 4                   # 事件附近额外加帧数
+    neighbor_sec: float = 0.8                     # 事件邻域半径（秒）
+    event_signal_threshold: float = 0.6           # 触发加帧的信号阈值
+
+    # ===== ROI证据裁剪 =====
+    roi_crops_enabled: bool = False               # 是否启用ROI裁剪（暂时关闭）
+    roi_crops_per_stage: int = 2                  # 每阶段ROI裁剪数
+    roi_scale: float = 1.5                        # ROI扩展比例
+
+    # ===== 升级策略配置 v2 =====
+    escalate_on_verdicts: List[str] = field(default_factory=lambda: ["UNCERTAIN", "POST_EVENT_ONLY"])
+    escalate_on_conflict: bool = True             # risk_score高但verdict=NO时升级
+    conflict_risk_threshold: float = 0.6          # conflict规则的risk阈值（降低以更敏感）
+
+    # v2新增升级规则
+    escalate_on_low_conf_no: bool = True          # verdict=NO但置信度低时升级
+    low_conf_no_threshold: float = 0.5            # 低置信度NO的阈值
+    escalate_on_high_signal: bool = True          # 高信号分时升级
+    high_signal_threshold: float = 0.7            # 高信号分阈值
+
+    # VLM输入形态配置
+    use_overlay_frames: bool = False              # 是否使用YOLO框叠加（默认False=无框原图）
+    include_object_metadata_text: bool = True     # 是否包含结构化文本元数据
+
+    # 关键帧选择信号权重
+    motion_peak_weight: float = 0.3               # 运动峰值权重
+    interaction_peak_weight: float = 0.4          # 交互峰值权重（最重要）
+    trajectory_break_weight: float = 0.2          # 轨迹中断权重
+    post_event_cue_weight: float = 0.1            # 事故后线索权重
+
+    # S2升级后的verdict解析规则
+    # 保守策略：优先避免FPR上升
+    resolution_conservative: bool = True          # 使用保守解析规则
+
+    def get_s1_frames(self, clip_duration: float) -> int:
+        """根据clip时长返回S1帧数"""
+        if self.version != "v2":
+            return self.fast_frames_max
+
+        if clip_duration <= self.clip_duration_short:
+            return self.s1_frames_short
+        elif clip_duration <= self.clip_duration_mid:
+            return self.s1_frames_mid
+        else:
+            return self.s1_frames_long
+
+    def get_s2_frames(self, clip_duration: float) -> int:
+        """根据clip时长返回S2帧数（v2自适应）"""
+        if self.version != "v2":
+            return self.escalated_frames_max
+
+        # v2: S2帧数根据clip时长自适应
+        if clip_duration <= self.clip_duration_short:
+            s2 = self.s2_frames_short
+        elif clip_duration <= self.clip_duration_mid:
+            s2 = self.s2_frames_mid
+        else:
+            s2 = self.s2_frames_long
+
+        # 确保在min-max范围内
+        return max(self.s2_frames_min, min(self.s2_frames_max, s2))
+
+
+@dataclass
+class Stage3Config:
+    """S3阶段配置 - 困难场景增强分析
+
+    当S2返回NO但场景属于困难类型（夜间/雨天/低能见度）时，
+    使用增强prompt进行S3阶段分析，避免保守漏报。
+    """
+
+    # 功能开关
+    enabled: bool = False                         # 是否启用S3阶段
+
+    # S3 门控增帧配置 (v2.2)
+    s3_gate_enabled: bool = True                  # 是否启用S3门控 (False=所有clip都进S3)
+    s3_gate_on_uncertain: bool = True             # S2=UNCERTAIN时触发S3
+    s3_gate_on_high_signal_no: bool = True        # S2=NO但高信号时触发S3
+    s3_high_signal_threshold: float = 0.65        # 高信号阈值 (final_score >= 此值)
+    s3_gate_on_weather: bool = True               # 困难场景(weather prompt触发)时触发S3
+
+    # S3 Prompt注入配置
+    prompt_injection_enabled: bool = True         # 是否启用场景自适应prompt
+
+    # 场景检测关键词（从VLM text_summary中检测）
+    night_keywords: List[str] = field(default_factory=lambda: [
+        "夜间", "夜晚", "夜色", "黑暗", "灯光", "车灯", "路灯", "光线不足", "low light"
+    ])
+    rain_keywords: List[str] = field(default_factory=lambda: [
+        "雨天", "雨水", "下雨", "湿滑", "雨夜", "雨中", "rain", "wet"
+    ])
+    snow_keywords: List[str] = field(default_factory=lambda: [
+        "雪天", "下雪", "积雪", "雪地", "冰雪", "snow"
+    ])
+    fog_keywords: List[str] = field(default_factory=lambda: [
+        "雾天", "大雾", "浓雾", "能见度低", "fog", "visibility"
+    ])
+
+    # S3触发条件
+    trigger_on_s2_no: bool = True                 # S2=NO时触发（仅在困难场景下）
+    trigger_on_s2_uncertain: bool = True          # S2=UNCERTAIN时也触发
+
+    # S3帧配置
+    s3_frames: int = 16                           # S3阶段帧数
+
+    # S3场景prompt模板
+    difficult_scene_prompt_prefix: str = """【重要提示 - 困难场景分析】
+当前视频存在以下困难观测条件：{scene_conditions}
+
+在这类场景中，事故迹象可能不明显。请特别注意：
+1. 即使画面模糊或光线不足，仍需仔细寻找碰撞、刮擦、人员倒地等迹象
+2. 轨迹突然中断、车辆异常停止、目标消失等可能是事故信号
+3. 当存在不确定性时，宁可判定为UNCERTAIN也不要轻易判定为NO
+4. 如果有任何事故可能性（即使无法完全确认），应判定为YES或UNCERTAIN
+
+请基于以上指导重新分析：
+"""
+
+    # ROI裁剪配置（S3阶段可选）
+    roi_crop_enabled: bool = False                # 是否启用ROI裁剪（append模式）
+    roi_scale: float = 1.5                        # ROI扩展比例
+    roi_max_crops: int = 4                        # 最大ROI裁剪数
+
+    # S3结果置信度调整
+    boost_uncertain_to_yes: bool = False          # 是否将S3的UNCERTAIN提升为YES
+    uncertain_boost_threshold: float = 0.7        # UNCERTAIN confidence >= 此值时提升
 
 
 @dataclass
@@ -546,6 +724,8 @@ class TrafficVLMConfig:
     vlm_retention: VLMRetentionConfig = field(default_factory=VLMRetentionConfig)
     file_event: FileEventLocatorConfig = field(default_factory=FileEventLocatorConfig)
     rank_score: RankScoreConfig = field(default_factory=RankScoreConfig)
+    progressive_vlm: ProgressiveVLMConfig = field(default_factory=ProgressiveVLMConfig)
+    stage3: Stage3Config = field(default_factory=Stage3Config)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()

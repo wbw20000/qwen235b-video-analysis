@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 import uuid
 
-from .config import ClusterConfig
+from .config import ClusterConfig, CoverageConfig
+from .coverage_scorer import score_clips_with_coverage, log_coverage_ranking
 
 
 def _frame_accident_score(frame: Dict) -> float:
@@ -25,14 +26,12 @@ def _frame_accident_score(frame: Dict) -> float:
     return max(scores) if scores else 0.0
 
 
-def _cluster_center_ts(cluster: Dict) -> float:
-    ts_list = cluster.get("timestamps", [])
-    if not ts_list:
-        return 0.0
-    return sum(ts_list) / len(ts_list)
-
-
-def cluster_frames_to_clips(frame_candidates: List[Dict], cluster_config: ClusterConfig, accident_mode: bool = False) -> List[Dict]:
+def cluster_frames_to_clips(
+    frame_candidates: List[Dict],
+    cluster_config: ClusterConfig,
+    accident_mode: bool = False,
+    coverage_config: Optional[CoverageConfig] = None,
+) -> List[Dict]:
     """
     帧级候选 -> 时间聚类 -> clip 列表。
     frame_candidates: [{"metadata": {...}, "similarity_score": float, ...}]
@@ -42,6 +41,7 @@ def cluster_frames_to_clips(frame_candidates: List[Dict], cluster_config: Cluste
     - 限制单个 cluster 的最大时长，防止 clip 覆盖整个视频。
     - 基于 cluster 中心时间的窗口聚合，可在事故模式下放宽窗口/时长。
     - 事故信号可放宽时间间隔，并参与 clip_score 计算。
+    - 事故模式下启用 coverage_score 评估过程完整性。
     """
     if not frame_candidates:
         return []
@@ -82,12 +82,13 @@ def cluster_frames_to_clips(frame_candidates: List[Dict], cluster_config: Cluste
         max_clip_duration = accident_max_clip_duration if use_accident_window else default_max_clip_duration
 
         cluster_duration = ts - first_ts
-        cluster_center = _cluster_center_ts(last_cluster)
-        within_center_window = abs(ts - cluster_center) <= merge_window
+        # 滑动窗口：对比上一帧而非簇中心，避免误合并相隔很远的帧
+        last_ts = last_cluster["timestamps"][-1]
+        within_sliding_window = (ts - last_ts) <= merge_window
         within_max_duration = cluster_duration <= max_clip_duration
 
-        # 事故信号可放宽窗口，只要不超过最大时长
-        if (within_center_window and within_max_duration) or (use_accident_window and within_max_duration):
+        # 同时满足滑动窗口和最大时长限制才合并
+        if within_sliding_window and within_max_duration:
             last_cluster["timestamps"].append(ts)
             last_cluster["frames"].append(item)
             last_cluster["accident_score"] = max(cluster_acc_score, frame_acc_score)
@@ -114,10 +115,26 @@ def cluster_frames_to_clips(frame_candidates: List[Dict], cluster_config: Cluste
 
         start_ts = min(ts_list) - padding_pre
         end_ts = max(ts_list) + padding_post
-        max_similarity = max(f["similarity_score"] for f in cluster["frames"])
-        clip_score = (1.0 - cluster_config.accident_score_weight) * max_similarity + cluster_config.accident_score_weight * cluster_acc_score
+
+        # clip_score 优化：使用 max + mean 线性组合，降低单帧误检影响
+        similarity_scores = [f["similarity_score"] for f in cluster["frames"]]
+        max_similarity = max(similarity_scores)
+        mean_similarity = sum(similarity_scores) / len(similarity_scores)
+
+        accident_scores = [_frame_accident_score(f) for f in cluster["frames"]]
+        max_acc_score = max(accident_scores)
+        mean_acc_score = sum(accident_scores) / len(accident_scores)
+
+        # 混合策略：α 偏向 max（对明显事故敏感），但也考虑 mean（排除单帧误检）
+        alpha = getattr(cluster_config, "clip_score_max_weight", 0.6)
+        combined_similarity = alpha * max_similarity + (1 - alpha) * mean_similarity
+        combined_acc_score = alpha * max_acc_score + (1 - alpha) * mean_acc_score
+
+        # 最终 clip_score
+        weight = cluster_config.accident_score_weight
+        clip_score = (1.0 - weight) * combined_similarity + weight * combined_acc_score
         # clip_score 至少保持相似度的下限
-        clip_score = max(clip_score, max_similarity)
+        clip_score = max(clip_score, combined_similarity)
 
         # 长版剪辑的时间范围（仅事故簇）
         long_version = None
@@ -144,5 +161,13 @@ def cluster_frames_to_clips(frame_candidates: List[Dict], cluster_config: Cluste
             }
         )
 
+    # 先按clip_score排序
     clips = sorted(clips, key=lambda x: x["clip_score"], reverse=True)
+
+    # 事故模式下：应用coverage评分重新排序
+    if accident_mode and coverage_config and coverage_config.enabled:
+        clips = score_clips_with_coverage(clips, coverage_config)
+        if coverage_config.log_ranking:
+            log_coverage_ranking(clips)
+
     return clips[: cluster_config.candidate_clip_top_k]

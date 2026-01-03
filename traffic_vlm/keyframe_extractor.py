@@ -4,6 +4,7 @@ import os
 from typing import Dict, List
 import cv2
 from datetime import datetime, timedelta
+from PIL import Image
 
 from .config import StreamConfig
 from .video_stream_manager import VideoStreamManager
@@ -46,12 +47,16 @@ def extract_keyframes(
 
         cv2.imwrite(path, frame)
 
+        # 同时保留内存图像（避免写盘后再读回）
+        pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
         keyframes.append(
             {
                 "camera_id": camera_id,
                 "timestamp": ts,
                 "frame_idx": frame_idx,
                 "path": path,
+                "image": pil_image,  # 内存图像，供embedding直接使用
                 "trigger_score": trig.get("score", 0.0),
                 "trigger_type": trig.get("type", "unknown"),
             }
