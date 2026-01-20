@@ -122,6 +122,28 @@ def predict_file(
         if "stage3_roi_enabled" in config:
             vlm_config.stage3.roi_crop_enabled = config["stage3_roi_enabled"]
 
+        # Narrative Sidecar 配置
+        if "enable_narrative_sidecar" in config:
+            vlm_config.narrative_sidecar.enabled = config["enable_narrative_sidecar"]
+        if "narrative_trigger_yes" in config:
+            vlm_config.narrative_sidecar.trigger_on_yes = config["narrative_trigger_yes"]
+        if "narrative_trigger_uncertain" in config:
+            vlm_config.narrative_sidecar.trigger_on_uncertain = config["narrative_trigger_uncertain"]
+        if "narrative_trigger_post_event" in config:
+            vlm_config.narrative_sidecar.trigger_on_post_event_only = config["narrative_trigger_post_event"]
+
+        # VLM模型sweep参数透传（用于多模型对比评测）
+        if "model" in config:
+            vlm_config.vlm.model = config["model"]
+        if "temperature" in config:
+            vlm_config.vlm.temperature = config["temperature"]
+        if "top_p" in config:
+            vlm_config.vlm.top_p = config["top_p"]
+        if "max_tokens" in config:
+            vlm_config.vlm.max_tokens = config["max_tokens"]
+        if "repetition_penalty" in config:
+            vlm_config.vlm.repetition_penalty = config["repetition_penalty"]
+
         # 强制启用YOLO检测（评测必需）
         vlm_config.detector.enabled = True
 
@@ -432,6 +454,11 @@ class Evaluator:
                 item["topk_count"] = len(r.predict_result.topk)
                 item["pred_label"] = r.predict_result.pred_label
                 item["has_uncertain"] = r.predict_result.has_uncertain
+                # 新增：narrative_sidecar 字段
+                if r.predict_result.raw_pipeline_result:
+                    item["narrative_sidecar"] = r.predict_result.raw_pipeline_result.get(
+                        "narrative_sidecar", {"enabled": False, "triggered": False}
+                    )
             per_file.append(item)
 
         with open(os.path.join(eval_dir, "per_file.json"), "w", encoding="utf-8") as f:

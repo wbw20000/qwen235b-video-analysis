@@ -285,6 +285,7 @@ class TrafficVLMPipeline:
         generate_report: bool = False,
         report_output_dir: str = "reports",
         run_id: Optional[str] = None,
+        sidecar_prompt: Optional[str] = None,
     ) -> Dict:
         """
         运行完整的视频分析管线。
@@ -1248,6 +1249,29 @@ class TrafficVLMPipeline:
         }
         print(f"[pipeline] VLM统计: 总clips={vlm_stats['total_clips']}, 分析={vlm_stats['analyzed_clips']}, 跳过={vlm_stats['skipped_clips']}, UNCERTAIN={uncertain_count}")
 
+        # 提取所有clip的轨迹数据供前端展示
+        all_tracks_data = []
+        for prep in preprocessed_clips:
+            det_result = prep.get("det_result", {})
+            tracks = det_result.get("tracks", {})
+            if tracks:
+                merged = self._merge_close_tracks(tracks)
+                clip_info = prep.get("clip_info", {})
+                all_tracks_data.append({
+                    "clip_id": clip_info.get("clip_id", ""),
+                    "start_time": clip_info.get("start_time", 0),
+                    "end_time": clip_info.get("end_time", 0),
+                    "tracks": {
+                        tid: {
+                            "category": info.get("category"),
+                            "trajectory": info.get("trajectory", []),
+                            "merged_ids": info.get("merged_ids", [tid]),
+                        }
+                        for tid, info in merged.items()
+                    },
+                    "tracks_text": prep.get("tracks_text", ""),
+                })
+
         # 构建返回结果
         result = {
             "keyframes": keyframes,
@@ -1258,7 +1282,83 @@ class TrafficVLMPipeline:
             "templates": templates,
             "retry_metadata": retry_metadata,  # P0: 记录重试信息
             "perf_stats": perf_stats,  # P2: 性能监控统计
+            "tracks_data": all_tracks_data,  # 前端轨迹展示数据
         }
+
+        # ============ 事故复盘描述 Sidecar ============
+        if self.config.narrative_sidecar.enabled:
+            try:
+                from traffic_vlm.narrative_sidecar import run_narrative_sidecar
+
+                # 计算最终 verdict 和 confidence（优先级: YES > UNCERTAIN > POST_EVENT_ONLY > NO）
+                final_verdict = "NO"
+                final_confidence = 0.0
+                verdict_priority = {"YES": 4, "UNCERTAIN": 3, "POST_EVENT_ONLY": 2, "NO": 1}
+
+                for r in final_results:
+                    vlm_out = r.get("vlm_output", {})
+                    v = vlm_out.get("verdict", "NO")
+                    if verdict_priority.get(v, 0) > verdict_priority.get(final_verdict, 0):
+                        final_verdict = v
+                        final_confidence = vlm_out.get("confidence", 0.0) or 0.0
+
+                # 获取最后一次 VLM 使用的帧
+                sidecar_frames = []
+                sidecar_timestamps = []
+                sidecar_clip_meta = {}
+
+                sidecar_tracks_text = ""
+                for prep in reversed(preprocessed_clips):
+                    raw_images = prep.get("raw_images", [])
+                    if raw_images:
+                        sidecar_frames = raw_images
+                        # 提取时间戳
+                        clip_info = prep.get("clip_info", {})
+                        clip_start = clip_info.get("start_time", 0)
+                        clip_duration = clip_info.get("end_time", 0) - clip_start
+                        if clip_duration > 0 and len(raw_images) > 1:
+                            sidecar_timestamps = [clip_start + i * clip_duration / (len(raw_images) - 1)
+                                                  for i in range(len(raw_images))]
+                        else:
+                            sidecar_timestamps = [clip_start + i for i in range(len(raw_images))]
+                        sidecar_clip_meta = clip_info
+                        # 提取YOLO轨迹文本用于sidecar分析
+                        sidecar_tracks_text = prep.get("tracks_text", "")
+                        break
+
+                # 运行 sidecar - 每个视频独立目录，避免结果覆盖
+                if sidecar_frames:
+                    video_basename = os.path.splitext(os.path.basename(video_path))[0]
+                    sidecar_base_dir = Path(output_paths.get("base", "data")) / "sidecar_results" / video_basename
+                    sidecar_result = run_narrative_sidecar(
+                        casebook_dir=sidecar_base_dir,
+                        video_name=os.path.basename(video_path),
+                        final_verdict=final_verdict,
+                        final_confidence=final_confidence,
+                        frames=sidecar_frames,
+                        frame_timestamps_sec=sidecar_timestamps,
+                        clip_meta=sidecar_clip_meta,
+                        config=self.config.narrative_sidecar,
+                        custom_prompt=sidecar_prompt,
+                        yolo_tracks=sidecar_tracks_text,
+                    )
+                    result["narrative_sidecar"] = sidecar_result
+                    # 保存 casebook_dir 供前端读取 response.json
+                    result["narrative_sidecar"]["casebook_dir"] = str(sidecar_base_dir)
+                else:
+                    result["narrative_sidecar"] = {
+                        "enabled": True,
+                        "triggered": False,
+                        "error": "No frames available for sidecar"
+                    }
+
+            except Exception as e:
+                _safe_print(f"[WARN] Sidecar failed (non-fatal): {e}", flush=True)
+                result["narrative_sidecar"] = {
+                    "enabled": True,
+                    "triggered": False,
+                    "error": str(e)
+                }
 
         # ============ 生成诊断报告 ============
         if generate_report and HAS_REPORTING and report_context:
@@ -1431,24 +1531,198 @@ class TrafficVLMPipeline:
 
     @staticmethod
     def _tracks_to_text(tracks: Dict) -> str:
+        """
+        增强版轨迹文本生成，为VLM提供完整的轨迹分析证据
+
+        轨迹数据格式: trajectory = [(frame_idx, x, y, w, h), ...]
+        """
+        import math
+
         if not tracks:
             return ""
 
         # 轨迹去重与合并
         merged_tracks = TrafficVLMPipeline._merge_close_tracks(tracks)
 
-        parts = []
+        if not merged_tracks:
+            return ""
+
+        parts = ["=== YOLO+ByteTrack 轨迹分析 ===\n"]
+        track_analyses = {}  # 保存每个轨迹的分析结果，用于交叉检测
+
         for tid, info in merged_tracks.items():
             traj = info.get("trajectory", [])
-            merged_ids = info.get("merged_ids", [tid])
-            if traj:
-                start = traj[0]
-                end = traj[-1]
-                category = info.get("category", "目标")
-                # 格式优化：更醒目的ID格式，与标注帧中的"ID:X"一致
-                parts.append(f"【ID:{tid}】{category} - 轨迹从({start[1]:.0f},{start[2]:.0f})到({end[1]:.0f},{end[2]:.0f})")
+            if not traj or len(traj) < 2:
+                continue
 
-        return "\n".join(parts)
+            category = info.get("category", "目标")
+            merged_ids = info.get("merged_ids", [tid])
+
+            # 基础信息
+            start_frame = int(traj[0][0])
+            end_frame = int(traj[-1][0])
+            frame_count = len(traj)
+
+            # 提取坐标和bbox尺寸
+            positions = [(p[1], p[2]) for p in traj]  # (x, y)
+            frame_indices = [int(p[0]) for p in traj]
+            bbox_sizes = [(p[3], p[4]) for p in traj]  # (w, h)
+
+            # 计算速度序列（像素/帧间隔）
+            speeds = []
+            for i in range(1, len(positions)):
+                dx = positions[i][0] - positions[i-1][0]
+                dy = positions[i][1] - positions[i-1][1]
+                dist = math.sqrt(dx*dx + dy*dy)
+                frame_gap = max(1, frame_indices[i] - frame_indices[i-1])
+                speed = dist / frame_gap
+                speeds.append((frame_indices[i], speed))
+
+            # 速度统计
+            if speeds:
+                speed_values = [s[1] for s in speeds]
+                avg_speed = sum(speed_values) / len(speed_values)
+                max_speed_idx = speed_values.index(max(speed_values))
+                min_speed_idx = speed_values.index(min(speed_values))
+                max_speed = speed_values[max_speed_idx]
+                min_speed = speed_values[min_speed_idx]
+                max_speed_frame = speeds[max_speed_idx][0]
+                min_speed_frame = speeds[min_speed_idx][0]
+            else:
+                avg_speed = max_speed = min_speed = 0
+                max_speed_frame = min_speed_frame = start_frame
+
+            # 检测急刹（速度下降超过50%）
+            braking_events = []
+            for i in range(1, len(speeds)):
+                if speeds[i-1][1] > 5 and speeds[i][1] < speeds[i-1][1] * 0.5:
+                    decel_pct = (1 - speeds[i][1] / speeds[i-1][1]) * 100
+                    braking_events.append((speeds[i][0], decel_pct))
+
+            # 计算主要方向（起点到终点）
+            dx_total = positions[-1][0] - positions[0][0]
+            dy_total = positions[-1][1] - positions[0][1]
+            main_angle = math.degrees(math.atan2(-dy_total, dx_total))  # 屏幕坐标系y轴向下
+
+            # 方向描述
+            if abs(dx_total) > abs(dy_total) * 2:
+                direction = "向右" if dx_total > 0 else "向左"
+            elif abs(dy_total) > abs(dx_total) * 2:
+                direction = "向下" if dy_total > 0 else "向上"
+            else:
+                if dx_total > 0 and dy_total > 0:
+                    direction = "右下"
+                elif dx_total > 0 and dy_total < 0:
+                    direction = "右上"
+                elif dx_total < 0 and dy_total > 0:
+                    direction = "左下"
+                else:
+                    direction = "左上"
+
+            # bbox尺寸变化
+            start_area = bbox_sizes[0][0] * bbox_sizes[0][1]
+            end_area = bbox_sizes[-1][0] * bbox_sizes[-1][1]
+            area_change_pct = ((end_area - start_area) / max(start_area, 1)) * 100 if start_area > 0 else 0
+            size_trend = "接近摄像头" if area_change_pct > 30 else ("远离摄像头" if area_change_pct < -30 else "距离稳定")
+
+            # 异常检测
+            anomalies = []
+            if frame_count < 5:
+                anomalies.append("轨迹过短(可能ID断裂)")
+            if braking_events:
+                for bf, bp in braking_events:
+                    anomalies.append(f"帧{bf}急刹(减速{bp:.0f}%)")
+            if len(merged_ids) > 1:
+                anomalies.append(f"ID合并自{merged_ids}")
+
+            # 关键轨迹点采样（起点、1/4、1/2、3/4、终点）
+            sample_indices = [0]
+            if len(traj) >= 5:
+                sample_indices.extend([len(traj)//4, len(traj)//2, 3*len(traj)//4])
+            sample_indices.append(len(traj)-1)
+            sample_indices = sorted(set(sample_indices))
+
+            trajectory_points = []
+            for idx in sample_indices:
+                p = traj[idx]
+                trajectory_points.append(f"({p[1]:.0f},{p[2]:.0f})@F{int(p[0])}")
+
+            # 保存分析结果用于交叉检测
+            track_analyses[tid] = {
+                "positions": positions,
+                "frame_indices": frame_indices,
+                "category": category,
+            }
+
+            # 构建输出文本
+            status = "正常" if not anomalies else "⚠️异常"
+            header = f"【ID:{tid}】{category} (帧{start_frame}-{end_frame}, 共{frame_count}帧)"
+            if anomalies:
+                header += " ⚠️"
+
+            lines = [header]
+            lines.append(f"├─ 轨迹点: {' → '.join(trajectory_points)}")
+            lines.append(f"├─ 速度: 平均{avg_speed:.1f}px/帧, 最大{max_speed:.1f}@F{max_speed_frame}, 最小{min_speed:.1f}@F{min_speed_frame}")
+
+            if braking_events:
+                brake_desc = ", ".join([f"F{f}减速{p:.0f}%" for f, p in braking_events])
+                lines.append(f"├─ 急刹检测: {brake_desc}")
+
+            lines.append(f"├─ 方向: {direction} ({main_angle:.0f}°)")
+            lines.append(f"├─ bbox尺寸: {bbox_sizes[0][0]:.0f}x{bbox_sizes[0][1]:.0f}→{bbox_sizes[-1][0]:.0f}x{bbox_sizes[-1][1]:.0f} ({size_trend})")
+
+            if anomalies:
+                lines.append(f"└─ 异常: {'; '.join(anomalies)}")
+            else:
+                lines.append(f"└─ 状态: 正常")
+
+            parts.append("\n".join(lines))
+
+        # 轨迹交互分析（两两计算最近距离和交叉点）
+        interaction_lines = []
+        track_ids = list(track_analyses.keys())
+
+        for i, tid1 in enumerate(track_ids):
+            for tid2 in track_ids[i+1:]:
+                t1 = track_analyses[tid1]
+                t2 = track_analyses[tid2]
+
+                # 找到共同帧范围内的最近距离
+                min_dist = float('inf')
+                min_dist_frame = -1
+                cross_point = None
+
+                # 构建帧索引到位置的映射
+                t1_pos_map = dict(zip(t1["frame_indices"], t1["positions"]))
+                t2_pos_map = dict(zip(t2["frame_indices"], t2["positions"]))
+
+                common_frames = set(t1["frame_indices"]) & set(t2["frame_indices"])
+
+                for frame in common_frames:
+                    p1 = t1_pos_map[frame]
+                    p2 = t2_pos_map[frame]
+                    dist = math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)
+                    if dist < min_dist:
+                        min_dist = dist
+                        min_dist_frame = frame
+                        cross_point = ((p1[0]+p2[0])/2, (p1[1]+p2[1])/2)
+
+                if min_dist < 100 and min_dist_frame >= 0:  # 距离阈值100像素
+                    risk_level = "极高" if min_dist < 30 else ("高" if min_dist < 50 else "中等")
+                    interaction_lines.append(
+                        f"⚠️ ID:{tid1}({t1['category']}) 与 ID:{tid2}({t2['category']}) "
+                        f"最近距离: {min_dist:.0f}px @帧{min_dist_frame} (碰撞风险{risk_level})"
+                    )
+                    if cross_point:
+                        interaction_lines.append(
+                            f"   交汇位置: ({cross_point[0]:.0f}, {cross_point[1]:.0f})"
+                        )
+
+        if interaction_lines:
+            parts.append("\n--- 轨迹交互分析 ---")
+            parts.extend(interaction_lines)
+
+        return "\n\n".join(parts)
 
     @staticmethod
     def _traffic_light_to_text(states: List[Dict]) -> str:

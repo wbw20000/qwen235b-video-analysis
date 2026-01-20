@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Qwen3-VL 视频分析助手</title>
+    <title>北京车网大模型分析助手</title>
     <style>
         * {
             margin: 0;
@@ -329,8 +329,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎬 Qwen3-VL 视频分析助手</h1>
-        <p class="subtitle">通过阿里云 DashScope API 调用 Qwen3-VL 模型</p>
+        <h1>🚗 北京车网大模型分析助手</h1>
 
         <form id="uploadForm" enctype="multipart/form-data">
             <!-- 输入方式选择 -->
@@ -339,7 +338,7 @@
                 <div style="display: flex; gap: 20px; margin-top: 10px;">
                     <label style="display: flex; align-items: center; cursor: pointer;">
                         <input type="radio" name="input_method" value="upload" id="inputMethodUpload" checked style="width: auto; margin-right: 8px;">
-                        <span>📁 上传本地视频 (需压缩至10MB以下)</span>
+                        <span>📁 上传本地视频</span>
                     </label>
                     <label style="display: flex; align-items: center; cursor: pointer;">
                         <input type="radio" name="input_method" value="url" id="inputMethodUrl" style="width: auto; margin-right: 8px;">
@@ -386,125 +385,55 @@
                 <small style="color: #666; margin-top: 8px; display: block;">不同模型的性能和价格不同，推荐使用 Qwen-VL-Plus</small>
             </div>
 
-            <!-- ==================== 新增：抽帧策略选择 ==================== -->
+            <!-- 隐藏的抽帧策略（保持后端兼容） -->
+            <input type="hidden" id="samplingStrategy" name="sampling_strategy" value="accident_analysis">
+            <input type="hidden" id="detectAccidentTime" value="true">
+            <input type="hidden" id="trackTrajectory" value="true">
+            <input type="hidden" id="analyzeEnvironment" value="true">
+            <input type="hidden" id="generateVisualization" value="false">
+
+            <!-- 检索方法 -->
             <div class="input-group">
-                <label for="samplingStrategy">抽帧策略:</label>
-                <select id="samplingStrategy" name="sampling_strategy"
+                <label for="searchMethod">检索方法</label>
+                <select id="searchMethod" name="search_method"
                         style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em;">
-                    <option value="full_video">📹 完整视频（当前默认方式）</option>
-                    <option value="accident_analysis" selected>🚗 交通事故分析（智能多级采样）</option>
-                    <option value="uniform_fps">⏱️ 均匀采样（固定FPS）</option>
-                    <option value="scene_detection">🎬 场景变化检测</option>
-                    <option value="keyframe_only">🖼️ 关键帧提取</option>
-                    <option value="custom">⚙️ 自定义配置</option>
-                </select>
-                <small style="color: #666; margin-top: 8px; display: block;">
-                    💡 选择适合的抽帧策略可大幅提升分析速度和精度
-                </small>
-            </div>
-
-            <!-- 交通事故分析专用参数（当选择accident_analysis时显示） -->
-            <div class="input-group" id="accidentParamsArea" style="display: block;">
-                <label>交通事故分析配置:</label>
-                <div style="padding: 15px; background: #fff3e0; border-radius: 8px; border: 1px solid #ff9800;">
-                    <div style="margin-bottom: 10px;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="detectAccidentTime" checked
-                                   style="width: auto; margin-right: 10px;">
-                            <span>🕒 精确定位事故时间点</span>
-                        </label>
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="trackTrajectory" checked
-                                   style="width: auto; margin-right: 10px;">
-                            <span>📍 追踪参与者轨迹</span>
-                        </label>
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="analyzeEnvironment" checked
-                                   style="width: auto; margin-right: 10px;">
-                            <span>🌤️ 分析环境条件（天气/路面/车道）</span>
-                        </label>
-                    </div>
-                    <div>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="generateVisualization"
-                                   style="width: auto; margin-right: 10px;">
-                            <span>📊 生成轨迹可视化图（需本地处理）</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 均匀采样参数（当选择uniform_fps时显示） -->
-            <div class="input-group" id="uniformParamsArea" style="display: none;">
-                <label for="uniformFps">采样帧率 (FPS):</label>
-                <input type="number" id="uniformFps" name="uniform_fps" value="1" min="0.1" max="30" step="0.1"
-                       style="width: 150px; padding: 8px; border: 2px solid #e0e0e0; border-radius: 8px;">
-                <small style="color: #666; margin-left: 10px;">
-                    提取每秒N帧，如1 FPS = 每秒1帧
-                </small>
-            </div>
-
-            <!-- 关键帧参数（当选择keyframe_only时显示） -->
-            <div class="input-group" id="keyframeParamsArea" style="display: none;">
-                <label for="keyframeCount">提取关键帧数量:</label>
-                <input type="number" id="keyframeCount" name="keyframe_count" value="16" min="4" max="128" step="4"
-                       style="width: 150px; padding: 8px; border: 2px solid #e0e0e0; border-radius: 8px;">
-                <small style="color: #666; margin-left: 10px;">
-                    从视频中均匀提取N个关键帧
-                </small>
-            </div>
-
-            <!-- 场景检测参数说明 -->
-            <div class="input-group" id="sceneParamsArea" style="display: none;">
-                <div style="padding: 15px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e0e0e0;">
-                    <p style="color: #666; margin: 0;">使用PySceneDetect自动检测场景变化，提取场景边界帧。</p>
-                </div>
-            </div>
-
-            <!-- 自定义配置 -->
-            <div class="input-group" id="customParamsArea" style="display: none;">
-                <label>自定义JSON配置:</label>
-                <textarea id="customConfig"
-                          style="width: 100%; min-height: 100px; margin-top: 8px; padding: 10px;
-                                 border: 2px solid #e0e0e0; border-radius: 8px; font-family: monospace;"
-                          placeholder='{"fps": 1, "max_frames": 64, "method": "uniform"}'></textarea>
-                <small style="color: #666; display: block; margin-top: 5px;">
-                    高级用户可自定义JSON配置参数
-                </small>
-            </div>
-            <!-- ==================== 新增结束 ==================== -->
-
-            <!-- 违法检索事件 -->
-            <div class="input-group">
-                <label for="eventQuery">违法检索事件</label>
-                <input id="eventQuery" name="event_query" type="text" placeholder="例如：二轮车逆行 / 闯红灯 / 占用机动车道 / 交通事故" value="二轮车逆行">
-                <small style="color: #666; display: block; margin-top: 5px;">多个事件用顿号或逗号分隔，默认使用 TrafficVLM 管线。</small>
-            </div>
-
-            <!-- 分析模式与 Camera ID -->
-            <div class="input-group">
-                <label for="analysisMode">分析模式</label>
-                <select id="analysisMode" name="analysis_mode">
-                    <option value="traffic_vlm" selected>TrafficVLM（违法检索）</option>
-                    <option value="accident_search">交通事故检索</option>
-                    <option value="legacy">传统模式（原生上传/抽帧）</option>
+                    <option value="accident" selected>🚗 交通事故</option>
+                    <option value="two_wheel_violation">🏍️ 二轮车违法</option>
+                    <option value="signal_violation">🚦 闯红灯</option>
+                    <option value="lane_violation">🛣️ 违规变道/占道</option>
                 </select>
             </div>
+
+            <!-- 隐藏的事件查询（根据检索方法自动设置） -->
+            <input type="hidden" id="eventQuery" name="event_query" value="交通事故">
+
+            <!-- 隐藏的分析模式（根据检索方法自动设置） -->
+            <input type="hidden" id="analysisMode" name="analysis_mode" value="accident_search">
 
             <div class="input-group">
                 <label for="cameraId">Camera ID</label>
                 <input id="cameraId" name="camera_id" type="text" value="camera-1" placeholder="camera-1">
             </div>
 
-            <!-- 提问区域 -->
-            <div class="input-group">
-                <label for="prompt">您的问题:</label>
-                <textarea id="prompt" name="prompt" placeholder="例如: 请详细描述这个视频中发生了什么，包括场景、人物动作和关键事件。">请详细描述这个视频中发生了什么。</textarea>
+            <!-- Sidecar Prompt 配置区域 (仅事故检索模式显示) -->
+            <div class="input-group" id="sidecarPromptArea" style="display: block;">
+                <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="togglePromptEditor()">
+                    <span>🔧 事故分析Prompt配置</span>
+                    <span id="promptToggleIcon" style="font-size: 1.2em;">▼</span>
+                </label>
+                <div id="promptEditorContainer" style="display: none; margin-top: 10px;">
+                    <textarea id="sidecarPrompt" name="sidecar_prompt" style="height: 300px; font-family: monospace; font-size: 12px;" placeholder="加载中..." oninput="onPromptChange()"></textarea>
+                    <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
+                        <button type="button" class="btn btn-primary" id="confirmPromptBtn" onclick="confirmPromptChange()">✅ 确认修改</button>
+                        <button type="button" class="btn" style="background: #e0e0e0; color: #333;" onclick="resetPromptToDefault()">📋 重置为默认</button>
+                        <span id="promptStatus" style="font-size: 12px;"></span>
+                    </div>
+                    <small style="color: #666; display: block; margin-top: 8px;">💡 提示: 修改prompt可调整分析重点，点击"确认修改"后生效</small>
+                </div>
             </div>
+
+            <!-- 隐藏的提问区域（保持后端兼容） -->
+            <input type="hidden" id="prompt" name="prompt" value="请详细描述这个视频中发生了什么。">
 
             <!-- 自动压缩选项 (已禁用 - 改用抽帧策略) -->
             <div class="input-group" id="compressOption" style="display: none;">
@@ -598,35 +527,41 @@
                     📥 下载压缩后的视频
                 </a>
             </div>
+
+            <!-- 追问对话区域 -->
+            <div id="followupDialogArea" style="display: none; margin-top: 20px; border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: #fafafa;">
+                <div style="font-weight: bold; margin-bottom: 15px; color: #333;">
+                    💬 追问对话
+                    <span style="font-weight: normal; font-size: 12px; color: #666; margin-left: 10px;">基于分析结果继续对话</span>
+                </div>
+
+                <!-- 对话历史区域 -->
+                <div id="conversationHistory" style="max-height: 400px; overflow-y: auto; margin-bottom: 15px; padding: 10px; background: white; border-radius: 6px; border: 1px solid #e0e0e0;">
+                    <div class="chat-message system-message" style="padding: 10px; background: #e3f2fd; border-radius: 6px; margin-bottom: 10px;">
+                        <span style="color: #1565c0;">🤖</span> VLM分析完成。您可以针对分析结果继续提问。
+                    </div>
+                </div>
+
+                <!-- 输入区域 -->
+                <div style="display: flex; gap: 10px; align-items: flex-end;">
+                    <textarea id="followupQuestion" placeholder="请输入您的问题，针对事故分析结果进行追问..."
+                        style="flex: 1; height: 60px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: none;"></textarea>
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <button type="button" id="sendFollowupBtn" class="btn btn-primary" style="padding: 10px 20px;" onclick="sendFollowupQuestion()">
+                            🚀 发送
+                        </button>
+                        <button type="button" class="btn" style="background: #e0e0e0; color: #333; padding: 8px 15px; font-size: 12px;" onclick="clearConversation()">
+                            🔄 清空
+                        </button>
+                    </div>
+                </div>
+
+                <div style="margin-top: 10px; font-size: 12px; color: #888;">
+                    💡 提示: 可以询问事故细节、证据判断依据、责任分析等
+                </div>
+            </div>
         </div>
 
-        <!-- 使用提示 -->
-        <div class="tips">
-            <div class="tips-title">💡 使用提示</div>
-            <ul>
-                <li>🌐 <strong>两种输入方式</strong>：
-                    <ul style="margin-top: 5px;">
-                        <li>• <strong>上传本地视频</strong>：base64编码上传，需压缩至10MB以下，适合短视频</li>
-                        <li>• <strong>提供视频URL</strong>：直接传递URL，支持最大2GB，保持原始清晰度，适合高质量长视频</li>
-                    </ul>
-                </li>
-                <li>✨ <strong>实时进度显示</strong> - 压缩和上传进度实时更新，清晰可见</li>
-                <li>📥 <strong>下载压缩视频</strong> - 压缩后的视频可以下载保存，方便：
-                    <ul style="margin-top: 5px;">
-                        <li>• 切换模型再次分析，无需重复压缩</li>
-                        <li>• 修改提问后快速重新分析</li>
-                        <li>• 保存为小文件便于存储和分享</li>
-                    </ul>
-                </li>
-                <li>🗜️ <strong>自动视频压缩</strong> - 上传方式下，大于 7MB 的视频会自动压缩到 6.5MB</li>
-                <li>🔧 自动压缩需要安装 FFmpeg（<a href="https://ffmpeg.org/download.html" target="_blank" style="color: #667eea;">下载地址</a>）</li>
-                <li>使用阿里云 DashScope API，无需本地部署大模型</li>
-                <li>支持 2 秒到 20 分钟的视频（MP4, AVI, MKV, MOV, FLV, WMV）</li>
-                <li>可以针对视频内容提出具体问题，如"视频中有哪些交通标志？"</li>
-                <li>💡 <strong>推荐使用URL方式</strong>：对于需要分析细节的高清视频，使用URL方式可避免压缩损失</li>
-                <li>API 调用按使用量计费，请参考阿里云定价</li>
-            </ul>
-        </div>
     </div>
 
     <script>
@@ -651,13 +586,11 @@
         let currentSessionId = null;
         let isAnalyzing = false;
 
-        // 抽帧策略相关元素
+        // 检索方法相关元素
+        const searchMethod = document.getElementById('searchMethod');
+        const eventQuery = document.getElementById('eventQuery');
+        const analysisMode = document.getElementById('analysisMode');
         const samplingStrategy = document.getElementById('samplingStrategy');
-        const accidentParamsArea = document.getElementById('accidentParamsArea');
-        const uniformParamsArea = document.getElementById('uniformParamsArea');
-        const keyframeParamsArea = document.getElementById('keyframeParamsArea');
-        const sceneParamsArea = document.getElementById('sceneParamsArea');
-        const customParamsArea = document.getElementById('customParamsArea');
 
         // 保存用户输入的URL，防止丢失
         let savedVideoUrl = '';
@@ -693,46 +626,35 @@
             }
         });
 
-        // ==================== 抽帧策略切换逻辑 ====================
-        samplingStrategy.addEventListener('change', function() {
-            const strategy = this.value;
+        // ==================== 检索方法切换逻辑 ====================
+        searchMethod.addEventListener('change', function() {
+            const method = this.value;
 
-            // 隐藏所有参数区域
-            accidentParamsArea.style.display = 'none';
-            uniformParamsArea.style.display = 'none';
-            keyframeParamsArea.style.display = 'none';
-            sceneParamsArea.style.display = 'none';
-            customParamsArea.style.display = 'none';
-
-            // 根据选择显示对应参数
-            switch(strategy) {
-                case 'full_video':
-                    // 完整视频，无需额外参数
+            // 根据检索方法设置对应的事件查询和分析模式
+            switch(method) {
+                case 'accident':
+                    eventQuery.value = '交通事故';
+                    analysisMode.value = 'accident_search';
+                    // 显示sidecar prompt区域
+                    document.getElementById('sidecarPromptArea').style.display = 'block';
                     break;
 
-                case 'accident_analysis':
-                    // 交通事故分析
-                    accidentParamsArea.style.display = 'block';
+                case 'two_wheel_violation':
+                    eventQuery.value = '二轮车逆行、二轮车闯红灯、二轮车占用机动车道';
+                    analysisMode.value = 'traffic_vlm';
+                    document.getElementById('sidecarPromptArea').style.display = 'none';
                     break;
 
-                case 'uniform_fps':
-                    // 均匀采样
-                    uniformParamsArea.style.display = 'block';
+                case 'signal_violation':
+                    eventQuery.value = '闯红灯';
+                    analysisMode.value = 'traffic_vlm';
+                    document.getElementById('sidecarPromptArea').style.display = 'none';
                     break;
 
-                case 'scene_detection':
-                    // 场景检测
-                    sceneParamsArea.style.display = 'block';
-                    break;
-
-                case 'keyframe_only':
-                    // 关键帧提取
-                    keyframeParamsArea.style.display = 'block';
-                    break;
-
-                case 'custom':
-                    // 自定义配置
-                    customParamsArea.style.display = 'block';
+                case 'lane_violation':
+                    eventQuery.value = '违规变道、占用机动车道、逆行';
+                    analysisMode.value = 'traffic_vlm';
+                    document.getElementById('sidecarPromptArea').style.display = 'none';
                     break;
             }
         });
@@ -765,19 +687,12 @@
 
         function handleFileSelect(file) {
             if (file) {
-                // 检查文件大小（建议小于7MB）
-                const maxSize = 7 * 1024 * 1024; // 7MB
                 const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
 
                 fileName.textContent = file.name + ` (${fileSizeMB} MB)`;
                 selectedFile.classList.add('show');
                 error.classList.remove('show');
                 resultArea.classList.remove('show');
-
-                // 如果文件太大，显示警告
-                if (file.size > maxSize) {
-                    showError(`视频文件较大（${fileSizeMB} MB），建议压缩到 7MB 以下。文件过大可能导致上传失败！`);
-                }
             }
         }
 
@@ -913,6 +828,527 @@
         // 停止按钮点击事件
         stopBtn.addEventListener('click', stopAnalysis);
 
+
+        // ==================== Sidecar Prompt 相关函数 ====================
+        let defaultSidecarPrompt = '';
+        let promptModified = false;   // prompt是否被修改
+        let promptConfirmed = false;  // prompt修改是否已确认
+
+        // ==================== 追问对话相关变量 ====================
+        let followupSessionId = null;  // 追问对话的会话ID（不同于SSE的currentSessionId）
+
+        // 加载默认 prompt
+        async function loadDefaultPrompt() {
+            try {
+                const response = await fetch('/api/default-prompt');
+                const data = await response.json();
+                if (data.success) {
+                    defaultSidecarPrompt = data.prompt;
+                    document.getElementById('sidecarPrompt').value = data.prompt;
+                    promptModified = false;
+                    promptConfirmed = false;
+                    updatePromptStatus();
+                }
+            } catch (e) {
+                console.error('Failed to load default prompt:', e);
+            }
+        }
+
+        // 切换 prompt 编辑器显示
+        function togglePromptEditor() {
+            const container = document.getElementById('promptEditorContainer');
+            const icon = document.getElementById('promptToggleIcon');
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                icon.textContent = '▲';
+            } else {
+                container.style.display = 'none';
+                icon.textContent = '▼';
+            }
+        }
+
+        // 检测prompt变化
+        function onPromptChange() {
+            const current = document.getElementById('sidecarPrompt').value;
+            promptModified = (current !== defaultSidecarPrompt);
+            if (promptModified) {
+                promptConfirmed = false;  // 修改后需要重新确认
+            }
+            updatePromptStatus();
+        }
+
+        // 确认prompt修改
+        function confirmPromptChange() {
+            if (promptModified) {
+                promptConfirmed = true;
+                updatePromptStatus();
+            }
+        }
+
+        // 更新prompt状态显示
+        function updatePromptStatus() {
+            const status = document.getElementById('promptStatus');
+            const confirmBtn = document.getElementById('confirmPromptBtn');
+
+            if (!promptModified) {
+                status.textContent = '';
+                confirmBtn.disabled = true;
+                confirmBtn.style.opacity = '0.5';
+            } else if (promptConfirmed) {
+                status.textContent = '✅ 已确认使用自定义Prompt';
+                status.style.color = '#4caf50';
+                confirmBtn.disabled = true;
+                confirmBtn.style.opacity = '0.5';
+            } else {
+                status.textContent = '⚠️ Prompt已修改，请点击确认后生效';
+                status.style.color = '#ff9800';
+                confirmBtn.disabled = false;
+                confirmBtn.style.opacity = '1';
+            }
+        }
+
+        // 重置为默认 prompt
+        function resetPromptToDefault() {
+            document.getElementById('sidecarPrompt').value = defaultSidecarPrompt;
+            promptModified = false;
+            promptConfirmed = false;
+            updatePromptStatus();
+        }
+
+        // ==================== 追问对话相关函数 ====================
+
+        // 发送追问问题
+        async function sendFollowupQuestion() {
+            const questionInput = document.getElementById('followupQuestion');
+            const question = questionInput.value.trim();
+
+            if (!question) {
+                alert('请输入问题');
+                return;
+            }
+
+            if (!followupSessionId) {
+                alert('会话已过期，请重新进行事故分析');
+                return;
+            }
+
+            const sendBtn = document.getElementById('sendFollowupBtn');
+            sendBtn.disabled = true;
+            sendBtn.textContent = '发送中...';
+
+            // 添加用户消息到对话历史
+            appendMessage('user', question);
+            questionInput.value = '';
+
+            try {
+                const response = await fetch('/api/followup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: followupSessionId,
+                        question: question
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    appendMessage('assistant', data.answer);
+                } else {
+                    appendMessage('error', data.error || '请求失败');
+                }
+            } catch (e) {
+                console.error('Followup error:', e);
+                appendMessage('error', '网络错误: ' + e.message);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '🚀 发送';
+            }
+        }
+
+        // 添加消息到对话历史
+        function appendMessage(role, content) {
+            const history = document.getElementById('conversationHistory');
+            const msgDiv = document.createElement('div');
+
+            if (role === 'user') {
+                msgDiv.style.cssText = 'padding: 10px; background: #e8f5e9; border-radius: 6px; margin-bottom: 10px; text-align: right;';
+                msgDiv.innerHTML = '<span style="color: #2e7d32;">👤 您:</span> ' + escapeHtml(content);
+            } else if (role === 'assistant') {
+                msgDiv.style.cssText = 'padding: 10px; background: #f3e5f5; border-radius: 6px; margin-bottom: 10px;';
+                msgDiv.innerHTML = '<span style="color: #7b1fa2;">🤖 VLM:</span><br>' + formatMessage(content);
+            } else if (role === 'error') {
+                msgDiv.style.cssText = 'padding: 10px; background: #ffebee; border-radius: 6px; margin-bottom: 10px; color: #c62828;';
+                msgDiv.innerHTML = '⚠️ ' + escapeHtml(content);
+            }
+
+            history.appendChild(msgDiv);
+            history.scrollTop = history.scrollHeight;
+        }
+
+        // 清空对话历史
+        async function clearConversation() {
+            if (!followupSessionId) return;
+
+            try {
+                await fetch('/api/followup/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: followupSessionId })
+                });
+            } catch (e) {
+                console.error('Clear conversation error:', e);
+            }
+
+            // 重置UI
+            const history = document.getElementById('conversationHistory');
+            history.innerHTML = '<div class="chat-message system-message" style="padding: 10px; background: #e3f2fd; border-radius: 6px; margin-bottom: 10px;"><span style="color: #1565c0;">🤖</span> VLM分析完成。您可以针对分析结果继续提问。</div>';
+        }
+
+        // 显示追问对话区域
+        function showFollowupDialog(sessionId) {
+            followupSessionId = sessionId;
+            document.getElementById('followupDialogArea').style.display = 'block';
+            // 重置对话历史UI（不调用后端）
+            const history = document.getElementById('conversationHistory');
+            history.innerHTML = '<div class="chat-message system-message" style="padding: 10px; background: #e3f2fd; border-radius: 6px; margin-bottom: 10px;"><span style="color: #1565c0;">🤖</span> VLM分析完成。您可以针对分析结果继续提问。</div>';
+        }
+
+        // 隐藏追问对话区域
+        function hideFollowupDialog() {
+            followupSessionId = null;
+            document.getElementById('followupDialogArea').style.display = 'none';
+        }
+
+        // HTML转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 格式化消息（支持换行）
+        function formatMessage(text) {
+            return escapeHtml(text).replace(/\n/g, '<br>');
+        }
+
+        // Enter键发送
+        document.getElementById('followupQuestion').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendFollowupQuestion();
+            }
+        });
+
+        // 页面加载时加载默认 prompt 并显示 sidecar prompt 区域（默认是事故检索）
+        loadDefaultPrompt();
+        
+        // 渲染事故分析结果（完整版）
+        function renderAccidentResult(data) {
+            const clips = data.clips_info || [];
+            const sidecar = data.sidecar_analysis || null;
+            let html = '';
+
+            // Clips 区域
+            if (clips.length > 0) {
+                html += '<div style="margin-bottom: 20px;"><h3>📹 检测到的事故片段 (' + clips.length + '个)</h3>';
+                clips.forEach((clip, idx) => {
+                    const duration = (clip.end_time - clip.start_time).toFixed(1);
+                    // 后端已规范化路径，直接使用
+                    let clipPath = clip.video_path || '';
+                    const trajScores = clip.trajectory_scores || {};
+                    html += '<div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 10px 0;">';
+                    html += '<strong>Clip ' + (idx + 1) + '</strong> ';
+                    html += '<span style="background: #667eea; color: white; padding: 2px 8px; border-radius: 4px;">评分: ' + (clip.clip_score || 0).toFixed(2) + '</span>';
+                    html += '<div style="margin-top: 8px; color: #666;">📍 时间: ' + clip.start_time.toFixed(1) + 's - ' + clip.end_time.toFixed(1) + 's (' + duration + '秒)</div>';
+                    html += '<div style="font-size: 12px; color: #888;">🎯 碰撞=' + (trajScores.collision_score || 0).toFixed(2) + ' 交叉=' + (trajScores.track_intersection_score || 0).toFixed(2) + ' 急刹=' + (trajScores.deceleration_score || 0).toFixed(2) + '</div>';
+                    if (clipPath) {
+                        html += '<div style="margin-top: 10px;">';
+                        html += '<a href="/clips/' + clipPath + '" target="_blank" style="background: #667eea; color: white; padding: 5px 15px; text-decoration: none; border-radius: 4px; font-size: 12px; margin-right: 8px;">▶️ 播放</a>';
+                        html += '<a href="/clips/' + clipPath + '" download style="background: #4caf50; color: white; padding: 5px 15px; text-decoration: none; border-radius: 4px; font-size: 12px;">📥 下载</a>';
+                        html += '</div>';
+                    }
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+
+            // 轨迹分析区域
+            const tracks = data.tracks_data || null;
+            if (tracks) {
+                html += '<div style="margin-bottom: 20px;"><h3>🛤️ 轨迹分析</h3>';
+                html += '<div style="background: #e3f2fd; padding: 15px; border-radius: 8px;">';
+
+                // YOLO检测轨迹
+                const mergedTracks = tracks.merged_tracks || [];
+                const trajScores = tracks.trajectory_scores || {};
+                if (mergedTracks.length > 0) {
+                    html += '<div style="margin-bottom: 15px; padding: 12px; background: white; border-radius: 6px; border-left: 4px solid #2196f3;">';
+                    html += '<strong>YOLO检测轨迹 (可能存在ID断裂)</strong><br/>';
+                    html += '<div style="margin-top: 10px;">';
+                    mergedTracks.forEach((track) => {
+                        const trackId = track.track_id || track.id || '-';
+                        const cls = track.cls || track.class || 'object';
+                        const typeIcon = {'car': '🚗', 'truck': '🚚', 'bus': '🚌', 'motorcycle': '🏍️', 'bicycle': '🚲', 'person': '🚶'}[cls.toLowerCase()] || '🔹';
+                        const startPos = track.start_pos || track.positions?.[0] || '-';
+                        const endPos = track.end_pos || track.positions?.[track.positions?.length - 1] || '-';
+                        const frameRange = track.frame_range || `${track.start_frame || '?'}-${track.end_frame || '?'}`;
+
+                        html += '<div style="margin: 6px 0; padding: 6px 10px; background: #f5f5f5; border-radius: 4px; font-size: 13px;">';
+                        html += '<strong>【ID:' + trackId + '】</strong> ' + typeIcon + ' ' + cls;
+                        if (startPos !== '-' && endPos !== '-') {
+                            html += ' 轨迹: (' + (Array.isArray(startPos) ? startPos.map(v => Math.round(v)).join(',') : startPos) + ')';
+                            html += '→(' + (Array.isArray(endPos) ? endPos.map(v => Math.round(v)).join(',') : endPos) + ')';
+                        }
+                        html += ' <span style="color: #888;">帧' + frameRange + '</span>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+
+                    // 轨迹评分
+                    if (Object.keys(trajScores).length > 0) {
+                        html += '<div style="margin-top: 10px; font-size: 13px; color: #555;">';
+                        html += '🎯 轨迹评分: ';
+                        html += '碰撞=' + (trajScores.collision_score || 0).toFixed(2) + ' ';
+                        html += '交叉=' + (trajScores.track_intersection_score || 0).toFixed(2) + ' ';
+                        html += '急刹=' + (trajScores.deceleration_score || 0).toFixed(2);
+                        html += '</div>';
+                    }
+                    html += '</div>';
+                }
+
+                // VLM轨迹推理（从sidecar participants中提取）
+                if (sidecar && sidecar.participants && sidecar.participants.length > 0) {
+                    html += '<div style="margin-bottom: 15px; padding: 12px; background: white; border-radius: 6px; border-left: 4px solid #4caf50;">';
+                    html += '<strong>🤖 VLM轨迹推理 (基于视觉证据)</strong><br/>';
+                    html += '<div style="margin-top: 10px;">';
+                    sidecar.participants.forEach((p) => {
+                        const typeIcon = {'CAR': '🚗', 'E_BIKE': '🏍️', 'MOTORCYCLE': '🏍️', 'PEDESTRIAN': '🚶', 'BICYCLE': '🚲', 'TRUCK': '🚚'}[p.type] || '🔹';
+                        html += '<div style="margin: 8px 0; padding: 8px 12px; background: #f9f9f9; border-radius: 4px;">';
+                        html += '<strong>【' + (p.id || 'P?') + '】</strong> ' + typeIcon + ' ' + (p.description || p.type || '-');
+
+                        // 轨迹帧范围
+                        if (p.first_frame !== undefined && p.last_frame !== undefined) {
+                            html += '<br/><span style="font-size: 12px; color: #666;">├─ 出现帧: ' + p.first_frame + ' - ' + p.last_frame + '</span>';
+                        }
+
+                        // 位置信息
+                        if (p.lane_or_position) {
+                            html += '<br/><span style="font-size: 12px; color: #666;">├─ 位置: ' + p.lane_or_position + '</span>';
+                        }
+
+                        // 轨迹分析详情（trajectory_analysis证据链）
+                        if (p.trajectory_analysis) {
+                            const ta = p.trajectory_analysis;
+
+                            // 运动阶段
+                            if (ta.motion_phases && ta.motion_phases.length > 0) {
+                                html += '<br/><span style="font-size: 12px; color: #555;">├─ <strong>运动阶段:</strong></span>';
+                                ta.motion_phases.forEach((phase, idx) => {
+                                    const prefix = (idx === ta.motion_phases.length - 1) ? '│  └─' : '│  ├─';
+                                    let phaseDesc = '帧' + (phase.frames ? phase.frames[0] + '-' + phase.frames[1] : '?') + ': ' + (phase.description || '-');
+                                    if (phase.speed_estimate) phaseDesc += ' (' + phase.speed_estimate + ')';
+                                    html += '<br/><span style="font-size: 11px; color: #777;">' + prefix + ' ' + phaseDesc + '</span>';
+                                });
+                            }
+
+                            // 关键位置
+                            if (ta.key_positions && ta.key_positions.length > 0) {
+                                html += '<br/><span style="font-size: 12px; color: #555;">├─ <strong>关键位置:</strong> ';
+                                html += ta.key_positions.map(kp => '帧' + kp.frame + ':' + (kp.position || kp.evidence || '-')).join(' → ');
+                                html += '</span>';
+                            }
+
+                            // 异常行为
+                            if (ta.abnormalities && ta.abnormalities.length > 0) {
+                                html += '<br/><span style="font-size: 12px; color: #f44336;">├─ <strong>异常行为:</strong> ' + ta.abnormalities.join('、') + '</span>';
+                            }
+
+                            // YOLO ID映射
+                            if (ta.yolo_id_notes) {
+                                html += '<br/><span style="font-size: 11px; color: #888;">└─ YOLO追踪: ' + ta.yolo_id_notes + '</span>';
+                            } else if (ta.yolo_id_mapping && ta.yolo_id_mapping.length > 0) {
+                                html += '<br/><span style="font-size: 11px; color: #888;">└─ YOLO ID: ' + ta.yolo_id_mapping.join(',') + '</span>';
+                            }
+                        } else {
+                            // 无trajectory_analysis时显示基本轨迹
+                            if (p.trajectory) {
+                                html += '<br/><span style="font-size: 12px; color: #666;">└─ 轨迹: ' + p.trajectory + '</span>';
+                            }
+                        }
+
+                        html += '</div>';
+                    });
+                    html += '</div></div>';
+                }
+
+                // 轨迹交互分析（从碰撞信息中提取）
+                if (sidecar && sidecar.collision) {
+                    html += '<div style="padding: 12px; background: white; border-radius: 6px; border-left: 4px solid #ff9800;">';
+                    html += '<strong>轨迹交互分析</strong><br/>';
+                    html += '<div style="margin-top: 8px; font-size: 13px;">';
+                    if (sidecar.collision.type) {
+                        html += '<div>⚠️ 碰撞类型: ' + sidecar.collision.type + '</div>';
+                    }
+                    if (sidecar.collision.impact_frame !== undefined) {
+                        html += '<div>⚠️ 碰撞发生于: 第' + sidecar.collision.impact_frame + '帧';
+                        if (sidecar.collision.impact_time) {
+                            html += ' (' + sidecar.collision.impact_time.toFixed(2) + 's)';
+                        }
+                        html += '</div>';
+                    }
+                    if (sidecar.collision.evidence) {
+                        html += '<div>⚠️ 碰撞证据: ' + sidecar.collision.evidence + '</div>';
+                    }
+                    html += '</div></div>';
+                }
+
+                html += '</div></div>';
+            }
+
+            // Sidecar 结果
+            if (sidecar) {
+                html += '<div style="margin-bottom: 20px;"><h3>🔍 事故复盘分析报告</h3>';
+                html += '<div style="background: #fff3e0; padding: 15px; border-radius: 8px;">';
+
+                // 状态信息
+                const statusColor = sidecar.accident_status === 'CONFIRMED' ? '#f44336' : (sidecar.accident_status === 'NO_ACCIDENT' ? '#4caf50' : '#ff9800');
+                html += '<div style="margin-bottom: 15px; padding: 12px; background: white; border-radius: 6px; border-left: 4px solid ' + statusColor + ';">';
+                html += '<strong>🚨 事故状态:</strong> <span style="color: ' + statusColor + '; font-weight: bold;">' + (sidecar.accident_status || 'UNKNOWN') + '</span>';
+                html += ' (置信度: ' + ((sidecar.confidence || 0) * 100).toFixed(0) + '%)';
+                if (sidecar.model_id) html += '<span style="float: right; font-size: 12px; color: #888;">模型: ' + sidecar.model_id + '</span>';
+                if (sidecar.latency_ms) html += '<span style="float: right; font-size: 12px; color: #888; margin-right: 15px;">延迟: ' + sidecar.latency_ms + 'ms</span>';
+                html += '</div>';
+
+                // 场景环境
+                if (sidecar.scene) {
+                    html += '<div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 6px;">';
+                    html += '<strong>🌤️ 场景环境:</strong><br/>';
+                    const scene = sidecar.scene;
+                    html += '<span style="margin-right: 15px;">光照: ' + (scene.lighting || '-') + '</span>';
+                    html += '<span style="margin-right: 15px;">天气: ' + (scene.weather || '-') + '</span>';
+                    html += '<span style="margin-right: 15px;">道路: ' + (scene.road_type || '-') + '</span>';
+                    if (scene.lanes) html += '<br/><span>车道: ' + scene.lanes + '</span>';
+                    if (scene.visibility_issues) html += '<br/><span style="color: #ff9800;">⚠️ 视野问题: ' + scene.visibility_issues + '</span>';
+                    html += '</div>';
+                }
+
+                // 参与者
+                const participants = sidecar.participants || [];
+                if (participants.length > 0) {
+                    html += '<div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 6px;">';
+                    html += '<strong>🚗 参与者 (' + participants.length + '个):</strong><br/>';
+                    participants.forEach((p, idx) => {
+                        const typeIcon = {'CAR': '🚗', 'E_BIKE': '🏍️', 'MOTORCYCLE': '🏍️', 'PEDESTRIAN': '🚶', 'BICYCLE': '🚲', 'TRUCK': '🚚'}[p.type] || '🔹';
+                        html += '<div style="margin: 8px 0; padding: 8px; background: #f5f5f5; border-radius: 4px;">';
+                        html += '<strong>[' + (p.id || 'P' + (idx + 1)) + ']</strong> ' + typeIcon + ' ' + (p.description || p.type || '-');
+                        if (p.first_frame !== undefined) html += ' <span style="font-size: 12px; color: #888;">(帧 ' + p.first_frame + '-' + p.last_frame + ')</span>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                // 事件时间线
+                const timeline = sidecar.timeline || [];
+                if (timeline.length > 0) {
+                    html += '<div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 6px;">';
+                    html += '<strong>⏱️ 事件时间线:</strong><br/>';
+                    html += '<div style="border-left: 2px solid #667eea; margin-left: 10px; padding-left: 15px;">';
+                    timeline.forEach((event) => {
+                        const isCollision = event.is_collision || (event.description && event.description.includes('碰撞'));
+                        const eventStyle = isCollision ? 'color: #f44336; font-weight: bold;' : '';
+                        html += '<div style="margin: 6px 0; ' + eventStyle + '">';
+                        html += '<strong>帧 ' + (event.frame || '-') + '</strong>';
+                        if (event.timestamp) html += ' (' + event.timestamp + 's)';
+                        html += ' - ' + (event.description || '-');
+                        html += '</div>';
+                    });
+                    html += '</div></div>';
+                }
+
+                // 碰撞分析
+                if (sidecar.collision) {
+                    const col = sidecar.collision;
+                    html += '<div style="margin-bottom: 10px; padding: 10px; background: #ffebee; border-radius: 6px;">';
+                    html += '<strong>💥 碰撞分析:</strong><br/>';
+                    html += '<div style="margin-top: 8px;">';
+                    if (col.type) html += '<div>类型: ' + col.type + '</div>';
+                    if (col.impact_frame) html += '<div>碰撞帧: 第' + col.impact_frame + '帧</div>';
+                    if (col.evidence) html += '<div>证据: ' + col.evidence + '</div>';
+                    if (col.severity) html += '<div>严重程度: <span style="font-weight: bold;">' + col.severity + '</span></div>';
+                    if (col.consequences) {
+                        const cons = Array.isArray(col.consequences) ? col.consequences.join('、') : col.consequences;
+                        html += '<div>后果: ' + cons + '</div>';
+                    }
+                    html += '</div></div>';
+                }
+
+                // 交通违法行为（优先显示）
+                const violations = sidecar.traffic_violations || [];
+                if (violations.length > 0) {
+                    html += '<div style="margin-bottom: 10px; padding: 10px; background: #ffebee; border-radius: 6px; border-left: 4px solid #f44336;">';
+                    html += '<strong>🚨 交通违法行为:</strong><br/>';
+                    violations.forEach((v) => {
+                        const levelColor = {'HIGH': '#f44336', 'MEDIUM': '#ff9800', 'LOW': '#4caf50'}[v.evidence_strength] || '#888';
+                        const levelIcon = {'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '🟢'}[v.evidence_strength] || '⚪';
+                        html += '<div style="margin: 8px 0; padding: 8px; background: white; border-radius: 4px; border-left: 3px solid ' + levelColor + ';">';
+                        html += levelIcon + ' <strong>' + (v.type || '-') + '</strong>';
+                        if (v.participant_id) html += ' <span style="color: #666;">[' + v.participant_id + ']</span>';
+                        if (v.description) html += '<br/><span style="font-size: 13px;">' + v.description + '</span>';
+                        if (v.evidence) html += '<br/><span style="font-size: 12px; color: #555;">证据: ' + v.evidence + '</span>';
+                        if (v.supporting_frames && v.supporting_frames.length > 0) html += '<br/><span style="font-size: 12px; color: #888;">证据帧: ' + v.supporting_frames.join(', ') + '</span>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                // 其他事故因素
+                const otherFactors = sidecar.other_contributing_factors || sidecar.factors || [];
+                if (otherFactors.length > 0) {
+                    html += '<div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 6px;">';
+                    html += '<strong>⚠️ 其他因素:</strong><br/>';
+                    otherFactors.forEach((f) => {
+                        const levelColor = {'HIGH': '#f44336', 'MEDIUM': '#ff9800', 'LOW': '#4caf50'}[f.evidence_strength || f.level] || '#888';
+                        const levelIcon = {'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '🟢'}[f.evidence_strength || f.level] || '⚪';
+                        html += '<div style="margin: 8px 0; padding: 8px; background: #f5f5f5; border-radius: 4px; border-left: 3px solid ' + levelColor + ';">';
+                        html += levelIcon + ' <strong>[' + (f.evidence_strength || f.level || '-') + ']</strong> ' + (f.factor || f.description || '-');
+                        if (f.supporting_frames && f.supporting_frames.length > 0) html += '<br/><span style="font-size: 12px; color: #888;">证据帧: ' + f.supporting_frames.join(', ') + '</span>';
+                        if (f.explanation) html += '<br/><span style="font-size: 12px; color: #666;">' + f.explanation + '</span>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                // 事故经过叙述
+                if (sidecar.narrative) {
+                    html += '<div style="margin-bottom: 10px; padding: 15px; background: #e8f5e9; border-radius: 6px;">';
+                    html += '<strong>📝 事故经过叙述:</strong><br/>';
+                    html += '<div style="margin-top: 8px; line-height: 1.6;">' + sidecar.narrative + '</div>';
+                    html += '</div>';
+                }
+
+                // 分析局限性
+                const unknowns = sidecar.unknowns || [];
+                const warnings = sidecar.quality_warnings || [];
+                if (unknowns.length > 0 || warnings.length > 0) {
+                    html += '<div style="padding: 10px; background: #fff8e1; border-radius: 6px; font-size: 13px;">';
+                    html += '<strong>⚠️ 分析局限性:</strong><br/>';
+                    unknowns.forEach((u) => {
+                        html += '<div style="margin: 4px 0; color: #666;">• ' + u + '</div>';
+                    });
+                    warnings.forEach((w) => {
+                        html += '<div style="margin: 4px 0; color: #888;">• ' + w + '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                html += '</div></div>';
+            }
+
+            return html || '<p>暂无分析结果</p>';
+        }
+        // ==================== 函数结束 ====================
+
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -952,6 +1388,20 @@
             formData.append('event_query', document.getElementById('eventQuery').value);
             formData.append('analysis_mode', document.getElementById('analysisMode').value);
             formData.append('camera_id', document.getElementById('cameraId').value);
+            
+            // 添加 sidecar prompt（仅事故检索模式，且用户已确认修改）
+            if (document.getElementById('analysisMode').value === 'accident_search') {
+                // 只有当用户修改了prompt并且点击了确认按钮，才使用自定义prompt
+                if (promptModified && promptConfirmed) {
+                    const sidecarPrompt = document.getElementById('sidecarPrompt').value;
+                    if (sidecarPrompt && sidecarPrompt.trim()) {
+                        formData.append('sidecar_prompt', sidecarPrompt);
+                        console.log('[DEBUG] 使用自定义sidecar prompt');
+                    }
+                } else {
+                    console.log('[DEBUG] 使用默认sidecar prompt');
+                }
+            }
 
             // ==================== 新增：抽帧策略参数 ====================
             formData.append('sampling_strategy', document.getElementById('samplingStrategy').value);
@@ -1060,10 +1510,30 @@
                                 console.log('[DEBUG] resultContent元素:', resultContent);
                                 console.log('[DEBUG] resultArea元素:', resultArea);
                                 console.log('[DEBUG] progressData.result:', progressData.result);
+                                console.log('[DEBUG] analysis_mode:', progressData.analysis_mode);
 
-                                if (progressData.result) {
+                                // 检查是否是事故分析模式
+                                if (progressData.analysis_mode === 'accident_search') {
+                                    // 调试：打印sidecar_analysis
+                                    console.log('[DEBUG] sidecar_analysis:', progressData.sidecar_analysis);
+                                    console.log('[DEBUG] clips_info:', progressData.clips_info);
+                                    console.log('[DEBUG] tracks_data:', progressData.tracks_data);
+
+                                    // 使用专门的事故结果渲染函数
+                                    const accidentHtml = renderAccidentResult(progressData);
+                                    resultContent.innerHTML = accidentHtml;
+                                    console.log('[DEBUG] 事故分析结果已渲染');
+
+                                    // 显示追问对话区域
+                                    if (progressData.session_id) {
+                                        showFollowupDialog(progressData.session_id);
+                                        console.log('[DEBUG] 追问对话区域已显示, session_id:', progressData.session_id);
+                                    }
+                                } else if (progressData.result) {
                                     resultContent.textContent = progressData.result;
                                     console.log('[DEBUG] 结果已设置到resultContent');
+                                    // 非事故模式隐藏追问对话
+                                    hideFollowupDialog();
                                 } else {
                                     console.error('[ERROR] progressData.result为空!');
                                     resultContent.textContent = '[错误] 未获取到分析结果';

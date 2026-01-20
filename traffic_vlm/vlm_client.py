@@ -507,6 +507,21 @@ def image_to_base64_url(path: str, max_width: int = None, quality: int = None) -
     return f"data:image/jpeg;base64,{data}"
 
 
+
+def _build_api_params(config, messages):
+    """构建API调用参数（支持参数透传）"""
+    api_params = {
+        'model': config.model,
+        'messages': messages,
+        'temperature': config.temperature,
+    }
+    if hasattr(config, 'top_p') and config.top_p != 1.0:
+        api_params['top_p'] = config.top_p
+    if hasattr(config, 'max_tokens'):
+        api_params['max_tokens'] = config.max_tokens
+    return api_params
+
+
 class VLMClient:
     def __init__(self, config: VLMConfig, api_key: Optional[str] = None):
         key = api_key or os.getenv("DASHSCOPE_API_KEY")
@@ -595,11 +610,8 @@ class VLMClient:
         _safe_print(user_prompt)
         _safe_print("="*60 + "\n")
 
-        completion = self.client.chat.completions.create(
-            model=self.config.model,
-            messages=messages,
-            temperature=self.config.temperature,
-        )
+        api_params = _build_api_params(self.config, messages)
+        completion = self.client.chat.completions.create(**api_params)
         text = completion.choices[0].message.content
 
         # 打印VLM返回结果
@@ -784,11 +796,8 @@ class VLMClient:
         _safe_print(user_prompt)
         _safe_print("="*60 + "\n")
 
-        completion = self.client.chat.completions.create(
-            model=self.config.model,
-            messages=messages,
-            temperature=self.config.temperature,
-        )
+        api_params = _build_api_params(self.config, messages)
+        completion = self.client.chat.completions.create(**api_params)
         text = completion.choices[0].message.content
 
         # 打印VLM返回结果
@@ -862,11 +871,8 @@ class VLMClient:
         _safe_print(f"[VLM异步] 事故检索模式 - 图片数:{len(images_to_send)}")
 
         # 异步调用VLM
-        completion = await self.async_client.chat.completions.create(
-            model=self.config.model,
-            messages=messages,
-            temperature=self.config.temperature,
-        )
+        api_params = _build_api_params(self.config, messages)
+        completion = await self.async_client.chat.completions.create(**api_params)
         text = completion.choices[0].message.content
 
         _safe_print(f"[VLM异步] 响应完成 - {len(text)} 字符")
@@ -1153,11 +1159,8 @@ class VLMClient:
         _safe_print(f"[元数据长度]: {len(metadata_text)} 字符")
         _safe_print("="*60 + "\n")
 
-        completion = self.client.chat.completions.create(
-            model=self.config.model,
-            messages=messages,
-            temperature=self.config.temperature,
-        )
+        api_params = _build_api_params(self.config, messages)
+        completion = self.client.chat.completions.create(**api_params)
         text = completion.choices[0].message.content
 
         # 打印VLM返回结果
@@ -1564,3 +1567,123 @@ class VLMClient:
             "_s3_n_frames": len(raw_images_s3),
             "s3_images_count": len(raw_images_s3),
         }
+
+    def followup_chat(
+        self,
+        frame_paths: List[str],
+        original_prompt: Optional[str],
+        original_response: Optional[Dict],
+        conversation_history: List[Dict],
+        question: str
+    ) -> str:
+        """
+        基于已完成的事故分析进行追问对话
+
+        Args:
+            frame_paths: 原分析使用的帧图片路径列表
+            original_prompt: 原分析使用的prompt
+            original_response: 原分析的sidecar响应（JSON）
+            conversation_history: 之前的对话历史 [{"role": "user/assistant", "content": "..."}]
+            question: 当前用户追问
+
+        Returns:
+            str: VLM的回答
+        """
+        _safe_print("\n" + "="*60)
+        _safe_print("[VLM请求] 追问对话模式")
+        _safe_print("="*60)
+        _safe_print(f"[模型]: {self.config.model}")
+        _safe_print(f"[问题]: {question[:100]}...")
+        _safe_print(f"[历史轮数]: {len(conversation_history) // 2}")
+
+        # 系统提示词
+        system_prompt = """你是一个专业的交通事故分析专家。用户之前已经对一段视频进行了事故分析，现在想针对分析结果进行追问。
+
+请注意：
+1. 你可以看到原始分析使用的视频帧图像
+2. 你可以看到之前的分析结果
+3. 请基于这些视觉证据和分析结果回答用户的追问
+4. 如果问题涉及帧中无法确定的内容，请诚实说明
+5. 引用证据时，请具体指出是哪个帧、哪个位置
+
+回答风格：
+- 只返回纯文字描述，不要返回JSON格式
+- 使用自然语言回答，像与人对话一样
+- 简洁明了，直接回答问题
+- 引用具体的帧号和视觉证据
+- 如果分析有不确定性，说明置信度
+"""
+
+        # 构建消息列表
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
+
+        # 添加原始分析上下文（包含图片）
+        original_content = []
+
+        # 添加原始prompt
+        if original_prompt:
+            original_content.append({
+                "type": "text",
+                "text": f"[原始分析Prompt]\n{original_prompt[:2000]}..."  # 截断避免太长
+            })
+
+        # 添加帧图片（限制数量避免太多）
+        max_frames = min(8, len(frame_paths))  # 最多显示8帧
+        for i, path in enumerate(frame_paths[:max_frames]):
+            if os.path.exists(path):
+                try:
+                    original_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": image_to_base64_url(path, max_width=800, quality=75)}
+                    })
+                except Exception as e:
+                    _safe_print(f"[警告] 无法加载帧 {path}: {e}")
+
+        if original_content:
+            messages.append({"role": "user", "content": original_content})
+
+        # 添加原始分析结果
+        if original_response:
+            # 将sidecar响应格式化为文本
+            if isinstance(original_response, dict):
+                response_text = json.dumps(original_response, ensure_ascii=False, indent=2)
+            else:
+                response_text = str(original_response)
+            messages.append({
+                "role": "assistant",
+                "content": f"[事故分析结果]\n{response_text[:3000]}"  # 截断避免太长
+            })
+
+        # 添加对话历史
+        for msg in conversation_history:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+
+        # 添加当前追问
+        messages.append({
+            "role": "user",
+            "content": question
+        })
+
+        # 调用VLM
+        try:
+            response = self.client.chat.completions.create(
+                model=self.config.model,
+                messages=messages,
+                temperature=0.7,  # 稍高一点以获得更自然的回答
+                max_tokens=2048
+            )
+
+            answer = response.choices[0].message.content
+            _safe_print(f"[VLM响应] {answer[:200]}...")
+            _safe_print("="*60 + "\n")
+
+            return answer
+
+        except Exception as e:
+            _safe_print(f"[VLM错误] {str(e)}")
+            raise RuntimeError(f"VLM调用失败: {str(e)}")

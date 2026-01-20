@@ -78,6 +78,11 @@ class VLMConfig:
     accident_frames_per_clip: int = 12  # 事故模式：发送更多帧给VLM
     temperature: float = 0.4
 
+    # 模型sweep参数透传
+    top_p: float = 1.0                   # top_p采样参数
+    max_tokens: int = 2000               # 最大输出token数
+    repetition_penalty: float = 1.0      # 重复惩罚系数
+
     # P0优化：VLM调用阈值过滤
     clip_score_threshold: float = 0.35  # clip_score低于此值跳过VLM调用
     skip_low_score_vlm: bool = True     # 是否启用阈值过滤
@@ -88,9 +93,9 @@ class VLMConfig:
                                         # confidence >= clip_score_threshold → YES (if verdict=YES)
 
     # P0优化：图像压缩减少传输（当前已关闭，发送原始标注图片）
-    image_max_width: int = 960          # 图像最大宽度（像素）
+    image_max_width: int = 640          # 图像最大宽度（像素）
     image_quality: int = 70             # JPEG压缩质量（1-100）
-    compress_images: bool = False       # 是否启用图像压缩（False=发送原始图片）
+    compress_images: bool = True        # 是否启用图像压缩（True=压缩后发送）
 
     # VLM并行调用配置
     vlm_max_concurrent: int = 3         # VLM最大并发数（3个并发请求）
@@ -388,6 +393,51 @@ class Stage3Config:
     # S3结果置信度调整
     boost_uncertain_to_yes: bool = False          # 是否将S3的UNCERTAIN提升为YES
     uncertain_boost_threshold: float = 0.7        # UNCERTAIN confidence >= 此值时提升
+
+
+@dataclass
+class NarrativeSidecarConfig:
+    """事故复盘描述 Sidecar 配置
+
+    在不改变现有事故判别pipeline的前提下，增加一个"事故复盘描述 sidecar"：
+    - 默认关闭，不影响任何现有行为
+    - 开启后只写附加文件，不影响最终判别结果
+    - 仅当 verdict 命中触发条件时，额外调用多个VLM模型生成JSON报告
+    - 固定解码参数保证可复现
+    - 异常不影响主流程
+    """
+
+    # 总开关
+    enabled: bool = True
+
+    # 触发条件
+    trigger_on_yes: bool = True                   # verdict=YES时触发
+    trigger_on_uncertain: bool = True             # verdict=UNCERTAIN时触发（帮助人工判定）
+    trigger_on_post_event_only: bool = True       # verdict=POST_EVENT_ONLY时触发（帮助确认事故）
+
+    # 模型列表（事故复盘使用单一模型）
+    models: List[str] = field(default_factory=lambda: [
+        "qwen3-vl-32b-instruct",  # 选定：描述最详细，适合复盘报告
+    ])
+
+    # VLM参数（固定可复现）
+    temperature: float = 0.0                      # 固定温度保证可复现
+    top_p: float = 1.0
+    max_tokens: int = 4096                        # 复盘报告需要更多token
+    repetition_penalty: float = 1.0
+    timeout_sec: int = 120                        # 单模型超时
+
+    # 并行控制
+    parallelism: int = 1                          # 单模型无需并行
+
+    # 帧来源
+    use_frames_from: str = "final_stage_input"    # 使用主流程最后一次VLM输入帧
+
+    # 输出目录
+    out_dirname: str = "vlm_narrative"            # casebook子目录名
+
+    # Prompt模板文件路径（相对于traffic_vlm目录）
+    prompt_template_file: str = "prompts/accident_narrative_prompt_v2.txt"
 
 
 @dataclass
@@ -726,6 +776,7 @@ class TrafficVLMConfig:
     rank_score: RankScoreConfig = field(default_factory=RankScoreConfig)
     progressive_vlm: ProgressiveVLMConfig = field(default_factory=ProgressiveVLMConfig)
     stage3: Stage3Config = field(default_factory=Stage3Config)
+    narrative_sidecar: NarrativeSidecarConfig = field(default_factory=NarrativeSidecarConfig)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()

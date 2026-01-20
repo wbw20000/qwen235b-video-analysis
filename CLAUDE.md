@@ -1,138 +1,310 @@
-\#目标：我想要调用Qwen3-VL-235B-A22B-Instruct这个模型，我想上传一个路测的视频，然后让Qwen3-VL-235B-A22B-Instruct这个模型对视频进行理解和分析。
+# 交通事故视频分析系统 - TrafficVLM
 
+## 项目概述
 
+基于 Qwen3-VL 大模型的交通事故智能检测系统，通过多阶段渐进式分析策略，实现高召回率、低误报率的事故检测。
 
-\#方法：
+**最新评测指标 (256视频测试)**:
+| 指标 | 数值 |
+|------|------|
+| Accuracy | 93.4% |
+| Precision | 99.4% |
+| Recall | 91.7% |
+| F1 Score | 95.4% |
+| FPR | 1.6% |
 
-&nbsp;##1 参考官网提供的调用方法，代码和说明网址是：https://modelscope.cn/models/Qwen/Qwen3-VL-235B-A22B-Instruct。
+## 项目结构
 
-\##2 你去网络上深度搜索成功调用的方法。
+```
+qwen235b/
+├── app.py                      # Flask Web应用入口
+├── templates/                  # 前端模板
+│   ├── index.html             # 主页面（视频上传分析）
+│   └── history.html           # 历史视频回溯分析页面
+│
+├── traffic_vlm/               # 核心分析引擎
+│   ├── pipeline.py            # 主处理管道（端到端）
+│   ├── config.py              # 配置中心（20+ dataclass）
+│   ├── vlm_client.py          # VLM API客户端（Qwen3-VL）
+│   ├── detector_and_tracker.py # YOLO检测 + ByteTrack跟踪
+│   ├── clip_sampler.py        # FFmpeg视频剪辑
+│   ├── embedding_indexer.py   # SigLIP向量检索
+│   ├── temporal_clusterer.py  # 时间聚类
+│   ├── coverage_scorer.py     # 覆盖率评分
+│   ├── keyframe_selector.py   # 关键帧选择
+│   ├── trajectory_scorer.py   # 轨迹碰撞评分
+│   ├── vlm_sampling.py        # VLM高频抽帧
+│   ├── tsingcloud_api.py      # 云控智行API客户端
+│   ├── history_video_processor.py # 历史视频处理
+│   ├── batch_processor.py     # 批量遍历处理器
+│   ├── gpu_service.py         # GPU加速服务
+│   └── visual_annotator.py    # 标注可视化
+│
+├── evaluation/                # 评测框架
+│   ├── evaluator.py           # 评测核心（predict_file）
+│   └── metrics.py             # 指标计算（TP/FP/TN/FN）
+│
+├── reporting/                 # 报告生成
+│   ├── report_builder.py      # 诊断报告构建器
+│   └── scorecard.py           # 评分卡
+│
+├── tools/                     # 工具脚本
+│   ├── run_eval_to_output.py  # 评测运行器
+│   ├── run_regression_eval.py # 回归测试
+│   ├── threshold_sweep.py     # 阈值扫描
+│   └── analysis/              # 分析工具
+│
+├── data/                      # 运行时数据
+│   ├── video_results/         # 分析结果缓存（.result.json.gz）
+│   ├── vlm_logs/              # VLM请求日志
+│   └── index.db               # SQLite索引
+│
+├── uploads/                   # 上传视频存储
+├── outputs/                   # 评测输出
+└── venv/                      # Python虚拟环境
+```
 
+## 核心模块说明
 
+### 1. Pipeline 主管道 (`traffic_vlm/pipeline.py`)
 
-\#结果：
+端到端处理流程：
+```
+视频输入 → 运动检测 → YOLO检测 → SigLIP检索 → 时间聚类 → 片段裁剪 → VLM分析 → 结果输出
+```
 
-&nbsp;最终生成一个可以跟Qwen3-VL-235B-A22B-Instruct对话的网页类似chatbox，让我可以上传视频，并拿到返回的结果。
+### 2. VLM 客户端 (`traffic_vlm/vlm_client.py`)
 
+- **支持模型**: qwen3-vl-plus (默认), qwen3-vl-32b, qwen3-vl-235b
+- **三阶段分析**: S1快速(12帧) → S2升级(18帧) → S3困难场景(16帧)
+- **四态判定**: YES / NO / UNCERTAIN / POST_EVENT_ONLY
 
+### 3. 配置中心 (`traffic_vlm/config.py`)
 
-\#重要规则：
+关键配置类:
+| 配置类 | 用途 |
+|--------|------|
+| `VLMConfig` | VLM调用参数（模型、帧数、阈值） |
+| `DetectorConfig` | YOLO检测参数（置信度、模型路径） |
+| `ProgressiveVLMConfig` | 渐进式VLM策略（S1/S2帧数） |
+| `Stage3Config` | S3困难场景配置（天气关键词） |
+| `CoverageConfig` | 覆盖率评分（pre_roll/post_roll） |
+| `TsingcloudConfig` | 云控智行API凭据 |
+| `BatchProcessConfig` | 批量处理配置 |
 
-\##虚拟环境使用规范
+### 4. 评测框架 (`evaluation/evaluator.py`)
 
-**强制要求**：本项目所有代码执行和依赖安装操作，必须在虚拟环境中进行。
+- `predict_file()`: 单视频预测
+- 输出: TP/FP/TN/FN, Recall, FPR, Precision, F1
 
-- **测试代码**：必须使用 `d:/project2025/qwen235b/venv/Scripts/python.exe`
-- **正式运行**：必须使用 `d:/project2025/qwen235b/venv/Scripts/python.exe`
-- **安装依赖**：必须使用 `d:/project2025/qwen235b/venv/Scripts/pip.exe`
+---
 
-**原因**：
-1. 系统Python环境缺少CUDA支持的PyTorch，会导致GPU加速失效
-2. 虚拟环境包含完整的项目依赖（torch+cu121、transformers等）
-3. 使用错误的Python会导致性能下降30-50倍
+## 开发规范
 
-**禁止**：
-- ❌ 直接使用 `python` 命令（可能调用系统Python）
-- ❌ 使用系统Python路径 `C:\Users\ALIENWARE\AppData\Local\Programs\Python\Python310\python.exe`
+### 虚拟环境使用
 
-**正确示例**：
+**强制要求**: 本项目所有代码执行必须在虚拟环境中进行。
+
 ```bash
-# 运行评测
-d:/project2025/qwen235b/venv/Scripts/python.exe run_full_eval.py --dump-video-results
+# 运行代码
+d:/project2025/qwen235b/venv/Scripts/python.exe xxx.py
 
 # 安装依赖
 d:/project2025/qwen235b/venv/Scripts/pip.exe install package-name
-
-# 运行测试
-d:/project2025/qwen235b/venv/Scripts/python.exe test_xxx.py
 ```
 
-## 日志输出长度限制
+**禁止**: 直接使用 `python` 命令或系统Python路径
 
-**强制要求**：在测试或执行代码时，监控的日志输出不要超过窗口上下文的最大长度。
+### 日志输出规范
 
-**具体措施**：
-- 长时间运行的任务使用后台模式（`run_in_background`），通过 `TaskOutput` 分批获取结果
-- 避免一次性输出大量日志，必要时使用 `block=false` 非阻塞检查状态
-- 对于批量处理任务，优先查看最终统计结果而非逐条日志
-- 如果日志过长导致截断，应主动查询结果文件或数据库获取完整信息
+- 长时间运行的任务使用后台模式（`run_in_background`）
+- 避免一次性输出大量日志
+- 优先查看最终统计结果而非逐条日志
 
-## 评测输出规范
+### 评测输出规范
 
-**强制要求**：**每次回归测试**以及**任何分析**都必须生成以下追踪文件：
-1. **Casebook (Markdown)** - FN/FP详细案例分析
-2. **Decision Trace (JSON)** - 决策链追踪
-
-这是为了便于归因分析、复现问题和持续改进。**禁止跳过这些输出。**
-
-### 必需输出文件
+每次回归测试必须生成:
 
 | 文件 | 格式 | 内容 |
 |------|------|------|
-| `summary.json` | JSON | 汇总指标 (TP/FP/TN/FN, Recall, FPR等) |
-| `per_file.json` | JSON | 每个视频的预测结果和decision_reason |
-| `casebook.md` | Markdown | FN/FP案例详细分析 (含VLM响应、关键帧路径) |
-| `decision_trace.json` | JSON | 每个视频的决策追踪链 |
-| `video_results/*.result.json.gz` | GZIP JSON | 完整pipeline输出 (需 `--dump-video-results`) |
-
-### Casebook 格式规范
-
-```markdown
-# Casebook - FN/FP 案例分析
-
-## FN-1: 101.mp4
-- **路径**: `uploads/事故数据集/101.mp4`
-- **Ground Truth**: 事故
-- **Prediction**: NO
-- **Decision Reason**: 无clip通过阈值
-
-### Clip 分析
-| clip_id | base_score | final_score | VLM verdict | confidence |
-|---------|------------|-------------|-------------|------------|
-| clip-xxx | 0.64 | 0.77 | NO | 0.95 |
-
-### VLM 响应
-- **S1**: verdict=NO, confidence=0.95
-- **S2**: verdict=UNCERTAIN, confidence=0.65
-- **Final**: NO
-- **Summary**: "监控画面显示夜间雨天道路..."
-
-### 关键帧
-- `data/camera-1/20251231/annotated_frames/clip-xxx/frame_00.jpg`
-- `data/camera-1/20251231/annotated_frames/clip-xxx/frame_05.jpg`
-```
-
-### Decision Trace 格式规范
-
-```json
-{
-  "video_name": "101.mp4",
-  "ground_truth": true,
-  "predicted": false,
-  "decision_chain": [
-    {"stage": "clip_generation", "clips_count": 1, "scores": [0.64]},
-    {"stage": "coverage_scoring", "final_scores": [0.77], "threshold": 0.35},
-    {"stage": "threshold_filter", "passed": 1, "skipped": 0},
-    {"stage": "vlm_s1", "verdict": "NO", "confidence": 0.95},
-    {"stage": "escalation", "triggered": true, "reason": "risk=1.00>=0.6"},
-    {"stage": "vlm_s2", "verdict": "UNCERTAIN", "confidence": 0.65},
-    {"stage": "final_decision", "verdict": "NO", "logic": "S1=NO takes precedence"}
-  ]
-}
-```
+| `summary.json` | JSON | 汇总指标 |
+| `per_file.json` | JSON | 每视频结果 |
+| `casebook.md` | Markdown | FN/FP案例分析 |
+| `decision_trace.json` | JSON | 决策链追踪 |
 
 ### 评测命令
 
 ```bash
-# 完整评测 (含casebook和decision_trace)
 d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
-  --output-dir outputs/run_xxx \
-  --dump-video-results
-
-# 启用Top-1 Fallback
-d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
-  --output-dir outputs/run_xxx \
-  --dump-video-results \
-  --enable-fallback
+  --output-dir outputs/run_xxx --dump-video-results
 ```
 
+---
+
+## 关键参数设定
+
+| 参数 | 值 | 理由 |
+|------|------|------|
+| VLM模型 | qwen3-vl-plus | 性价比最优，API调用成本低 |
+| YOLO模型 | yolo11s.pt | 检测精度与速度平衡 |
+| 检测置信度 | 0.2 | 低阈值确保不漏检 |
+| 检测尺寸 | 1280 | 远距离目标检测 |
+| clip_score_threshold | 0.35 | 平衡召回与误报 |
+| S1帧数 | 12 | 快速判定足够帧数 |
+| S2帧数 | 18 | 升级分析增加帧数 |
+| SigLIP模型 | siglip-base-patch16-384 | 语义检索精度高 |
+
+## 技术栈
+
+| 类别 | 技术 |
+|------|------|
+| 后端 | Flask, Python 3.10 |
+| 视觉模型 | Qwen3-VL (阿里云DashScope API) |
+| 目标检测 | YOLO11s + ByteTrack |
+| 向量检索 | SigLIP (google/siglip-base-patch16-384) |
+| 视频处理 | FFmpeg, OpenCV, decord |
+| GPU加速 | PyTorch + CUDA 12.1 |
+| 数据存储 | SQLite |
+
+---
+
+## 待办：消融实验（验证物理检测贡献）
+
+### 背景问题
+
+当前 `clip_score` 计算中存在**信号冗余**：
+- `similarity_score`：SigLIP 语义相似度（包含事故模板匹配）
+- `accident_template_hit`：命中事故模板时直接给 1.0
+
+```python
+# temporal_clusterer.py
+def _frame_accident_score(frame):
+    if meta.get("accident_template_hit"):
+        scores.append(1.0)  # 直接给1.0，淹没物理信号
+    return max(scores)
+```
+
+**问题**：只要命中事故模板，物理检测信号（collision/intersection/deceleration）就被淹没，可能没有实际贡献。
+
+### 消融实验设计
+
+| 实验 | 修改 | 验证目标 |
+|------|------|---------|
+| **A1: 禁用轨迹评分** | `trajectory_score.enabled = False` | 物理检测是否有用 |
+| **A2: 禁用 template_hit** | 注释 `accident_template_hit` 逻辑 | 信号冗余是否影响效果 |
+| **A3: 仅物理信号** | 移除 `accident_template_hit`，只用轨迹分数 | 物理检测能否独立工作 |
+
+### 实验命令
+
+```bash
+# 基线
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
+  --output-dir outputs/ablation_baseline
+
+# A1: 禁用轨迹评分
+# 修改 config.py: trajectory_score.enabled = False
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
+  --output-dir outputs/ablation_no_trajectory
+
+# A2: 禁用 template_hit
+# 修改 temporal_clusterer.py: 注释 accident_template_hit 相关代码
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
+  --output-dir outputs/ablation_no_template_hit
+```
+
+### 预期结论
+
+| 实验结果 | 说明 | 后续动作 |
+|---------|------|---------|
+| A1效果不变 | 物理检测无用 | 可移除省算力（YOLO少跑一次） |
+| A1效果下降 | 物理检测对边界案例有帮助 | 保留但优化权重 |
+| A2效果更好 | 当前设计有冗余 | 重构 clip_score 计算逻辑 |
+
+### 相关文件
+
+- `traffic_vlm/temporal_clusterer.py`: `_frame_accident_score()` 函数
+- `traffic_vlm/trajectory_scorer.py`: 轨迹评分计算
+- `traffic_vlm/config.py`: `TrajectoryScoreConfig.enabled`
+
+---
+
+## 待办：跟踪器升级（解决 ID 跳变和轨迹断裂）
+
+### 背景问题
+
+当前使用 ByteTrack 进行多目标跟踪，存在以下问题：
+- **ID 跳变**：碰撞后目标变形导致 ID 变化
+- **轨迹断裂**：遮挡、人车分离等场景下 track_id 不连续
+- **影响 VLM**：断裂的轨迹可能误导 VLM 的事故判断
+
+### 升级方案（分阶段）
+
+#### 第 1 阶段：低改造、快速验证（1-2 天）
+
+| 跟踪器 | 特点 | 适用场景 |
+|--------|------|----------|
+| **BoT-SORT-ReID** | 最像 ByteTrack 的升级版，MOT17 工程派最强 | 直接替换 ByteTrack |
+| **StrongSORT++** | 对断轨后的补链/平滑更友好 | DanceTrack/MOT17 |
+| **Hybrid-SORT** | DanceTrack 上明显强于 ByteTrack | 抗交叉遮挡 |
+
+#### 第 2 阶段：学习式多帧上下文关联
+
+| 跟踪器 | 特点 | 适用场景 |
+|--------|------|----------|
+| **MOTRv2** | DanceTrack 提升巨大，Transformer tracking-by-query | 最稳的落地起点 |
+| **MOTIP / ColTrack** | DanceTrack 排名靠前 | 需评估工程化成熟度 |
+
+#### 第 3 阶段：最强关联（算力/链路更重）
+
+| 跟踪器 | 特点 | 适用场景 |
+|--------|------|----------|
+| **SAM2MOT** | 对 ID 连续性提升最大，强调 zero-shot | 追求最不容易误导 VLM |
+
+### 相关文件
+
+- `traffic_vlm/detector_and_tracker.py`: 当前 YOLO + ByteTrack 实现
+- `traffic_vlm/custom_bytetrack.yaml`: ByteTrack 配置
+- `traffic_vlm/trajectory_scorer.py`: 依赖跟踪结果的轨迹评分
+
+---
+
+## 待办（最低优先级）：FN 案例分析与改进方向
+
+### 测试结果概述 (261 样本)
+
+| 指标 | 数值 |
+|------|------|
+| Recall | 88.6% |
+| Precision | 100% |
+| FN | 26 例 |
+
+### FN 案例分类（26例）
+
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| POST_EVENT_ONLY 未计为事故 | 6 | 仅看到后果，未判为事故 |
+| 困难场景漏检 | 5 | 夜间/雨天/远距离等 |
+| VLM 高置信误判 | 11 | VLM 高置信度判为 NO |
+| UNCERTAIN 未升级 | 4 | S1=UNCERTAIN 但未触发 S2 |
+
+### 改进方向（优先级排序）
+
+1. **POST_EVENT_ONLY 处理**（+3% Recall 潜力）
+   - 将 POST_EVENT_ONLY 视为事故阳性
+   - 修改 `evaluation/evaluator.py` 中的判定逻辑
+
+2. **启用 S3 阶段**
+   - `Stage3Config.enabled = True`
+   - 针对困难场景（夜间/雨天）二次分析
+
+3. **UNCERTAIN 升级机制**
+   - S1=UNCERTAIN 时强制触发 S2
+   - 当前 S2 触发条件可能遗漏部分 UNCERTAIN
+
+4. **VLM 误判分析**
+   - 需逐案例分析原因
+   - 可能需要优化 prompt 或增加帧数
+
+### 备注
+
+性能提升空间有限（约 3-5%），属于边际改进，优先级最低。

@@ -95,6 +95,11 @@ progress_queues = {}
 # 全局停止标志（用于中断分析）
 stop_flags = {}
 
+# 全局会话上下文缓存（用于追问对话）
+# 结构: {session_id: {frame_paths, sidecar_response, sidecar_prompt, conversation_history, created_at}}
+session_contexts = {}
+SESSION_CONTEXT_TTL = 3600  # 会话上下文存活时间（秒）
+
 
 def is_stopped(session_id: str) -> bool:
     """检查会话是否已被请求停止"""
@@ -1256,6 +1261,9 @@ def analyze():
                 'analyze_environment': request.form.get('analyze_environment', 'true').lower() == 'true'
             }
 
+        # 获取用户自定义的 sidecar prompt（可选）
+        sidecar_prompt = request.form.get('sidecar_prompt', '').strip() or None
+
         # 生成唯一的会话ID
         session_id = f"{int(time.time() * 1000)}_{os.getpid()}"
 
@@ -1337,6 +1345,214 @@ def analyze():
 
                     return "\n".join(analysis_parts)
 
+                def extract_sidecar_analysis(res, video_name=None):
+                    """提取并聚合 narrative_sidecar 的分析结果"""
+                    sidecar = res.get('narrative_sidecar', {})
+                    print(f"[Sidecar Debug] sidecar keys: {list(sidecar.keys()) if sidecar else 'None'}")
+                    print(f"[Sidecar Debug] triggered: {sidecar.get('triggered')}")
+                    print(f"[Sidecar Debug] cached: {sidecar.get('cached')}")
+
+                    if not sidecar or not sidecar.get('triggered'):
+                        print(f"[Sidecar Debug] 返回None - sidecar未触发或为空")
+                        return None
+
+                    # 从 models 中获取最佳结果
+                    models = sidecar.get('models', {})
+                    print(f"[Sidecar Debug] models: {list(models.keys())}")
+
+                    best_result = None
+                    best_model_id = None
+                    for model_id, result in models.items():
+                        has_parsed = bool(result.get('parsed_response'))
+                        print(f"[Sidecar Debug] model={model_id}, parse_ok={result.get('parse_ok')}, has_parsed_response={has_parsed}")
+                        if result.get('parse_ok'):
+                            best_result = result
+                            best_model_id = model_id
+                            break
+
+                    if not best_result:
+                        # 如果没有 parse_ok 的结果，取第一个
+                        for model_id, result in models.items():
+                            best_result = result
+                            best_model_id = model_id
+                            break
+
+                    if not best_result:
+                        print(f"[Sidecar Debug] 返回None - 没有找到任何模型结果")
+                        return None
+
+                    # 优先从 parsed_response 获取详细数据，否则使用顶层字段（兼容旧缓存）
+                    parsed = best_result.get('parsed_response') or {}
+                    print(f"[Sidecar Debug] parsed keys: {list(parsed.keys()) if parsed else 'empty'}")
+
+                    # 如果 parsed 为空，尝试从文件系统读取 response.json
+                    if not parsed and best_model_id:
+                        print(f"[Sidecar Debug] parsed为空，尝试从文件系统读取")
+                        try:
+                            import os
+                            from pathlib import Path
+                            # 尝试从 sidecar 或 res 中获取 casebook_dir
+                            casebook_dir = sidecar.get('casebook_dir', '') or res.get('casebook_dir', '')
+                            print(f"[Sidecar Debug] casebook_dir from sidecar/res: '{casebook_dir}'")
+
+                            # 如果 casebook_dir 为空，尝试推断路径
+                            if not casebook_dir:
+                                video_path = res.get('video_path', '') or res.get('input_video', '') or video_name
+                                print(f"[Sidecar Debug] 推断路径 video_path: '{video_path}'")
+                                if video_path:
+                                    video_basename = os.path.splitext(os.path.basename(video_path))[0]
+                                    casebook_dir = os.path.join('data', 'sidecar_results', video_basename)
+                                    print(f"[Sidecar Debug] 推断得到 casebook_dir: '{casebook_dir}'")
+
+                            if casebook_dir:
+                                # model_id 中的斜杠被替换成下划线
+                                safe_model_id = best_model_id.replace('/', '_')
+                                # out_dirname 默认是 vlm_narrative
+                                out_dirname = sidecar.get('out_dir', 'vlm_narrative')
+                                response_path = Path(casebook_dir) / out_dirname / safe_model_id / 'response.json'
+                                print(f"[Sidecar Debug] 尝试读取: {response_path}, exists={response_path.exists()}")
+                                if response_path.exists():
+                                    import json
+                                    parsed = json.loads(response_path.read_text(encoding='utf-8'))
+                                    print(f"[Sidecar Debug] 从文件加载成功, parsed keys: {list(parsed.keys())}")
+                                else:
+                                    print(f"[Sidecar Debug] response.json 不存在")
+                        except Exception as e:
+                            print(f"[Sidecar Debug] 无法从文件加载 parsed_response: {e}")
+
+                    # ====== 数据结构转换：将VLM原始格式转换为前端期望格式 ======
+
+                    # 1. 转换 scene_summary
+                    raw_scene = parsed.get('scene') or parsed.get('scene_summary') or {}
+                    transformed_scene = {
+                        'lighting': raw_scene.get('lighting', '-'),
+                        'weather': raw_scene.get('weather', '-'),
+                        'road_type': raw_scene.get('road_type', '-'),
+                        'lanes': raw_scene.get('lanes_observed', ''),
+                        'visibility_issues': ', '.join(raw_scene.get('visibility_issues', [])) if isinstance(raw_scene.get('visibility_issues'), list) else raw_scene.get('visibility_issues', '')
+                    }
+
+                    # 2. 转换 participants: first_seen.frame_index → first_frame
+                    raw_participants = parsed.get('participants', [])
+                    transformed_participants = []
+                    for p in raw_participants:
+                        first_seen = p.get('first_seen', {})
+                        last_seen = p.get('last_seen', {})
+                        transformed_p = {
+                            'id': p.get('id', ''),
+                            'type': p.get('type', ''),
+                            'description': p.get('appearance') or p.get('description', ''),
+                            'first_frame': first_seen.get('frame_index') if isinstance(first_seen, dict) else p.get('first_frame'),
+                            'last_frame': last_seen.get('frame_index') if isinstance(last_seen, dict) else p.get('last_frame'),
+                            'lane_or_position': p.get('lane_or_position', ''),
+                        }
+                        transformed_participants.append(transformed_p)
+
+                    # 3. 转换 timeline: t.frame_index → frame, t.frame_time_sec → timestamp, event → description
+                    raw_timeline = parsed.get('timeline', [])
+                    transformed_timeline = []
+                    for event in raw_timeline:
+                        t = event.get('t', {})
+                        is_collision = 'collision' in event.get('event', '').lower() or '碰撞' in event.get('event', '') or '撞' in event.get('event', '')
+                        transformed_event = {
+                            'frame': t.get('frame_index') if isinstance(t, dict) else event.get('frame'),
+                            'timestamp': t.get('frame_time_sec') if isinstance(t, dict) else event.get('timestamp'),
+                            'description': event.get('event') or event.get('description', ''),
+                            'is_collision': is_collision,
+                            'evidence': event.get('evidence', {})
+                        }
+                        transformed_timeline.append(transformed_event)
+
+                    # 4. 转换 collision_assessment → collision
+                    raw_collision = parsed.get('collision') or parsed.get('collision_assessment') or {}
+                    transformed_collision = None
+                    if raw_collision:
+                        impact_moment = raw_collision.get('impact_moment', {})
+                        estimated_time = impact_moment.get('estimated_time', {})
+                        consequences = raw_collision.get('post_event_consequences', [])
+                        consequence_types = [c.get('type', '') for c in consequences] if isinstance(consequences, list) else []
+                        transformed_collision = {
+                            'type': raw_collision.get('collision_type', ''),
+                            'impact_frame': estimated_time.get('frame_index') if isinstance(estimated_time, dict) else raw_collision.get('impact_frame'),
+                            'impact_time': estimated_time.get('frame_time_sec') if isinstance(estimated_time, dict) else None,
+                            'evidence': impact_moment.get('evidence', {}).get('notes', '') if isinstance(impact_moment.get('evidence'), dict) else '',
+                            'severity': raw_collision.get('severity', ''),
+                            'consequences': consequence_types
+                        }
+
+                    # 5. 转换 factors: hypothesis → factor, evidence_strength → level
+                    raw_factors = parsed.get('contributing_factors') or parsed.get('factors', [])
+                    transformed_factors = []
+                    for f in raw_factors:
+                        # evidence_strength: HIGH/MEDIUM/LOW → level
+                        evidence_strength = f.get('evidence_strength', '')
+                        transformed_f = {
+                            'level': evidence_strength,
+                            'factor': f.get('hypothesis') or f.get('factor', ''),
+                            'description': f.get('hypothesis') or f.get('description', ''),
+                            'evidence_frames': f.get('evidence', {}).get('frames', []) if isinstance(f.get('evidence'), dict) else f.get('evidence_frames', []),
+                            'explanation': f.get('evidence', {}).get('notes', '') if isinstance(f.get('evidence'), dict) else f.get('explanation', '')
+                        }
+                        transformed_factors.append(transformed_f)
+
+                    # 打印最终返回的数据摘要
+                    result_data = {
+                        'accident_status': parsed.get('accident_status') or best_result.get('accident_status'),
+                        'confidence': parsed.get('confidence') or best_result.get('confidence'),
+                        'scene': transformed_scene,
+                        'participants': transformed_participants,
+                        'timeline': transformed_timeline,
+                        'collision': transformed_collision,
+                        'factors': transformed_factors,
+                        'narrative': parsed.get('narrative') or parsed.get('final_narrative_cn'),
+                        'unknowns': parsed.get('unknowns', []),
+                        'quality_warnings': parsed.get('quality_warnings', []),
+                        'latency_ms': best_result.get('latency_ms'),
+                        'model_id': best_model_id,
+                    }
+                    print(f"[Sidecar Debug] 返回数据摘要: status={result_data['accident_status']}, "
+                          f"participants={len(result_data['participants'])}, timeline={len(result_data['timeline'])}, "
+                          f"has_collision={bool(result_data['collision'])}, has_narrative={bool(result_data['narrative'])}")
+                    return result_data
+
+                def extract_tracks_data(res):
+                    """提取轨迹追踪数据"""
+                    tracks = res.get('tracks_data', {})
+                    if not tracks:
+                        # 尝试从 merged_tracks 获取
+                        merged = res.get('merged_tracks', [])
+                        trajectory_scores = res.get('trajectory_scores', {})
+                        if merged:
+                            tracks = {
+                                'merged_tracks': merged,
+                                'trajectory_scores': trajectory_scores
+                            }
+                    return tracks if tracks else None
+
+                def extract_clips_info(res):
+                    """提取 clip 信息并规范化路径"""
+                    clips = res.get('clips', [])
+                    clips_info = []
+                    for clip in clips:
+                        video_path = clip.get('video_path', '')
+                        # 规范化路径：Windows反斜杠转正斜杠，移除data/前缀
+                        if video_path:
+                            video_path = video_path.replace('\\', '/')
+                            if video_path.startswith('data/'):
+                                video_path = video_path[5:]
+
+                        info = {
+                            'clip_id': clip.get('clip_id', ''),
+                            'start_time': clip.get('start_time', 0),
+                            'end_time': clip.get('end_time', 0),
+                            'duration': clip.get('end_time', 0) - clip.get('start_time', 0),
+                            'clip_score': clip.get('clip_score', 0),
+                            'trajectory_scores': clip.get('trajectory_scores', {}),
+                            'video_path': video_path
+                        }
+                        clips_info.append(info)
+                    return clips_info
+
                 if analysis_mode == 'traffic_vlm':
                     # 检查是否已被停止
                     if is_stopped(session_id):
@@ -1392,10 +1608,31 @@ def analyze():
 
                     try:
                         pipeline = TrafficVLMPipeline(config=TrafficVLMConfig(), progress_cb=pipeline_progress)
-                        pipeline_result = pipeline.run(video_source_path, user_intent, camera_id=camera_id, mode="accident")
+                        pipeline_result = pipeline.run(video_source_path, user_intent, camera_id=camera_id, mode="accident", sidecar_prompt=sidecar_prompt)
 
-                        # 返回详细的分析结果
+                        # 返回详细的分析结果（包含sidecar结果）
                         detailed_analysis = extract_detailed_analysis(pipeline_result)
+                        sidecar_analysis = extract_sidecar_analysis(pipeline_result, video_name=video_source_path)
+                        tracks_data = extract_tracks_data(pipeline_result)
+                        clips_info = extract_clips_info(pipeline_result)
+
+                        # 缓存会话上下文，用于后续追问对话
+                        frame_paths = []
+                        if sidecar_analysis and 'frames_analyzed' in sidecar_analysis:
+                            frame_paths = sidecar_analysis.get('frames_analyzed', [])
+                        elif 'keyframes' in pipeline_result:
+                            frame_paths = [kf.get('path', '') for kf in pipeline_result.get('keyframes', []) if kf.get('path')]
+
+                        session_contexts[session_id] = {
+                            'frame_paths': frame_paths,
+                            'sidecar_response': sidecar_analysis,
+                            'sidecar_prompt': sidecar_prompt,
+                            'conversation_history': [],
+                            'created_at': time.time(),
+                            'video_source': video_source_path,
+                            'camera_id': camera_id
+                        }
+                        print(f"[Session {session_id}] 会话上下文已缓存，帧数: {len(frame_paths)}")
 
                         response_data = {
                             'type': 'complete',
@@ -1404,7 +1641,13 @@ def analyze():
                             'analysis_mode': 'accident_search',
                             'video_source': video_source_path,
                             'model': model,
-                            'pipeline': pipeline_result
+                            'pipeline': pipeline_result,
+                            # 新增：前端展示用数据
+                            'sidecar_analysis': sidecar_analysis,
+                            'tracks_data': tracks_data,
+                            'clips_info': clips_info,
+                            # 追问对话用的session_id
+                            'session_id': session_id,
                         }
                         progress_queues[session_id].put(response_data)
                     except InterruptedError as e:
@@ -1645,6 +1888,157 @@ def stop_analysis(session_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/default-prompt')
+def get_default_prompt():
+    """获取默认的 sidecar prompt 模板"""
+    try:
+        from pathlib import Path as P
+        prompt_file = P(__file__).parent / 'traffic_vlm' / 'prompts' / 'accident_narrative_prompt_v2.txt'
+        if prompt_file.exists():
+            prompt_content = prompt_file.read_text(encoding='utf-8')
+            return jsonify({'success': True, 'prompt': prompt_content})
+        else:
+            return jsonify({'success': False, 'error': 'Prompt模板文件不存在'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/clips/<path:filepath>')
+def serve_clip(filepath):
+    """提供clip视频文件的访问"""
+    import os
+    from flask import send_file, abort
+
+    # 规范化路径：处理Windows反斜杠
+    filepath = filepath.replace('\\', '/')
+
+    # 安全检查：确保路径在data目录下
+    base_dir = os.path.abspath('data')
+    full_path = os.path.abspath(os.path.join('data', filepath))
+
+    # 使用 normpath 进行更严格的路径比较
+    if not os.path.normpath(full_path).startswith(os.path.normpath(base_dir)):
+        print(f"[ERROR] 禁止访问: {full_path}")
+        abort(403)  # 禁止访问data目录外的文件
+
+    if not os.path.exists(full_path):
+        print(f"[ERROR] 文件不存在: {full_path}")
+        abort(404)
+
+    # 返回视频文件
+    return send_file(full_path, mimetype='video/mp4')
+
+
+@app.route('/api/followup', methods=['POST'])
+def followup_question():
+    """
+    追问对话API - 基于已完成的事故分析进行多轮对话
+
+    请求体:
+    {
+        "session_id": str,          # 原分析会话ID
+        "question": str,            # 用户追问内容
+    }
+
+    响应:
+    {
+        "success": bool,
+        "answer": str,              # VLM回答
+        "model": str,
+        "latency_ms": int
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '请求体为空'}), 400
+
+        session_id = data.get('session_id')
+        question = data.get('question', '').strip()
+
+        if not session_id:
+            return jsonify({'success': False, 'error': '缺少session_id参数'}), 400
+        if not question:
+            return jsonify({'success': False, 'error': '问题不能为空'}), 400
+
+        # 检查会话是否存在
+        if session_id not in session_contexts:
+            return jsonify({
+                'success': False,
+                'error': '会话不存在或已过期，请重新进行事故分析'
+            }), 404
+
+        # 检查会话是否过期
+        context = session_contexts[session_id]
+        if time.time() - context['created_at'] > SESSION_CONTEXT_TTL:
+            del session_contexts[session_id]
+            return jsonify({
+                'success': False,
+                'error': '会话已过期，请重新进行事故分析'
+            }), 410
+
+        # 导入VLM客户端
+        from traffic_vlm.vlm_client import VLMClient
+        from traffic_vlm.config import VLMConfig
+
+        start_time = time.time()
+
+        # 构建多轮对话消息
+        vlm_client = VLMClient(VLMConfig())
+        answer = vlm_client.followup_chat(
+            frame_paths=context['frame_paths'],
+            original_prompt=context['sidecar_prompt'],
+            original_response=context['sidecar_response'],
+            conversation_history=context['conversation_history'],
+            question=question
+        )
+
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        # 更新对话历史
+        context['conversation_history'].append({
+            'role': 'user',
+            'content': question
+        })
+        context['conversation_history'].append({
+            'role': 'assistant',
+            'content': answer
+        })
+
+        return jsonify({
+            'success': True,
+            'answer': answer,
+            'model': vlm_client.config.model,
+            'latency_ms': latency_ms
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'追问对话失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/followup/clear', methods=['POST'])
+def clear_followup_history():
+    """清空追问对话历史"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id') if data else None
+
+        if session_id and session_id in session_contexts:
+            session_contexts[session_id]['conversation_history'] = []
+            return jsonify({'success': True, 'message': '对话历史已清空'})
+        else:
+            return jsonify({'success': False, 'error': '会话不存在'}), 404
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/health', methods=['GET'])
 def health():
