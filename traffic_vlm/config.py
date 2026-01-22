@@ -11,11 +11,11 @@ class StreamConfig:
 
     lowres_size: Tuple[int, int] = (640, 360)
     lowres_fps: int = 12
-    motion_method: str = "mog2"  # mog2 | frame_diff | none
+    motion_method: str = "mog2"  # [优化配置] 仅保留MOG2运动检测
     motion_min_fg_ratio: float = 0.015
     motion_min_score: float = 8.0
     motion_debounce_frames: int = 2
-    always_sample_interval_seconds: float = 1.0
+    always_sample_interval_seconds: float = 999.0  # [优化配置] 禁用均匀采样（负贡献-0.9%）
     min_keyframe_interval: float = 2.0
     roi_polygon: Optional[List[Tuple[int, int]]] = None
 
@@ -59,7 +59,7 @@ class ClusterConfig:
 class DetectorConfig:
     """本地检测与跟踪配置（可选）。"""
 
-    enabled: bool = True
+    enabled: bool = False  # [优化配置] 禁用YOLO检测（贡献仅0.8%）
     model_path: str = "yolo11s.pt"  # 升级到YOLO11s，遮挡和异常姿态检测更好
     tracker: str = "bytetrack"
     confidence_threshold: float = 0.2  # 配置一: 置信度阈值
@@ -110,7 +110,7 @@ class VLMConfig:
 class TrajectoryScoreConfig:
     """轨迹碰撞评分配置（用于降低误检率）"""
 
-    enabled: bool = True                          # 是否启用轨迹评分
+    enabled: bool = False                         # [优化配置] 禁用轨迹评分（贡献仅1.3%）
     time_window_seconds: float = 3.0              # 违法模式时间窗口
     accident_time_window_seconds: float = 4.0     # 事故模式时间窗口
     min_similarity_score: float = 0.35            # 只处理相似度>=0.35的候选
