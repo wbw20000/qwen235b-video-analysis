@@ -1,0 +1,133 @@
+# Embedding Service Deployment - SigLIP (1×T4 GPU 整卡隔离)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: embedding-config
+  namespace: traffic-vlm
+data:
+  MODEL_NAME: "google/siglip-base-patch16-384"
+  MODEL_PATH: "/models/siglip-base-patch16-384"
+  VECTOR_TTL: "3600"
+  BATCH_SIZE: "32"
+  MAX_REQUESTS: "1000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding-service
+  namespace: traffic-vlm
+  labels:
+    app: embedding-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: embedding-service
+  template:
+    metadata:
+      labels:
+        app: embedding-service
+    spec:
+      containers:
+      - name: embedding
+        image: localhost:5000/embedding-service:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: MODEL_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: embedding-config
+              key: MODEL_NAME
+        - name: MODEL_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: embedding-config
+              key: MODEL_PATH
+        - name: VECTOR_TTL
+          valueFrom:
+            configMapKeyRef:
+              name: embedding-config
+              key: VECTOR_TTL
+        - name: BATCH_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: embedding-config
+              key: BATCH_SIZE
+        - name: MAX_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: embedding-config
+              key: MAX_REQUESTS
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 30
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-service
+  namespace: traffic-vlm
+spec:
+  selector:
+    app: embedding-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+---
+# HPA for Embedding Service (可扩展到 3 个实例)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: embedding-service-hpa
+  namespace: traffic-vlm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: embedding-service
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

@@ -1,0 +1,2 @@
+# Aggregator 依赖
+redis>=4.5.0

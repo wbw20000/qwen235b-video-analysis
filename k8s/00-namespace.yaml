@@ -1,0 +1,118 @@
+# Namespace 和存储配置
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traffic-vlm
+  labels:
+    app.kubernetes.io/name: traffic-vlm
+    app.kubernetes.io/component: namespace
+---
+# PersistentVolume - 模型存储 (只读)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-models
+  labels:
+    type: models
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  hostPath:
+    path: /data/models
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-models
+  namespace: traffic-vlm
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 500Gi
+  selector:
+    matchLabels:
+      type: models
+---
+# PersistentVolume - 视频存储 (读写)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-videos
+  labels:
+    type: videos
+spec:
+  capacity:
+    storage: 1500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  hostPath:
+    path: /data1/videos
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-videos
+  namespace: traffic-vlm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 1500Gi
+  selector:
+    matchLabels:
+      type: videos
+---
+# PersistentVolume - 结果存储 (读写)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-results
+  labels:
+    type: results
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  hostPath:
+    path: /data1/results
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-results
+  namespace: traffic-vlm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 500Gi
+  selector:
+    matchLabels:
+      type: results
+---
+# StorageClass for local storage
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer

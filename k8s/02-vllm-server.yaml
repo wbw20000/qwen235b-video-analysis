@@ -1,0 +1,103 @@
+# vLLM Server StatefulSet - Qwen3-VL-32B-AWQ (2×T4 GPU)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vllm-server
+  namespace: traffic-vlm
+  labels:
+    app: vllm-server
+spec:
+  serviceName: vllm
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-server
+  template:
+    metadata:
+      labels:
+        app: vllm-server
+    spec:
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.6.6.post1
+        args:
+        - "--model"
+        - "/models/qwen3-vl-32b-awq"
+        - "--served-model-name"
+        - "qwen3-vl-32b"
+        - "--tensor-parallel-size"
+        - "2"
+        - "--max-model-len"
+        - "4096"
+        - "--gpu-memory-utilization"
+        - "0.85"
+        - "--max-num-seqs"
+        - "2"
+        - "--port"
+        - "8000"
+        - "--trust-remote-code"
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: "2,3"  # 固定 GPU 2-3
+        - name: VLLM_WORKER_MULTIPROC_METHOD
+          value: "spawn"
+        resources:
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            nvidia.com/gpu: "2"
+          limits:
+            cpu: "8"
+            memory: "64Gi"
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true
+        - name: cache
+          mountPath: /root/.cache
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 180
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 300
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+      - name: cache
+        emptyDir:
+          sizeLimit: 10Gi
+      nodeSelector:
+        nvidia.com/gpu.product: Tesla-T4
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-server
+  namespace: traffic-vlm
+spec:
+  selector:
+    app: vllm-server
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http

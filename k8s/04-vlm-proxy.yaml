@@ -1,0 +1,67 @@
+# VLM Proxy Deployment - 并发阀门 (P0 必做)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vlm-proxy
+  namespace: traffic-vlm
+  labels:
+    app: vlm-proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vlm-proxy
+  template:
+    metadata:
+      labels:
+        app: vlm-proxy
+    spec:
+      containers:
+      - name: vlm-proxy
+        image: localhost:5000/vlm-proxy:latest
+        ports:
+        - containerPort: 8001
+          name: http
+        env:
+        - name: VLLM_BASE_URL
+          value: "http://vllm-server.traffic-vlm.svc.cluster.local:8000/v1"
+        - name: MAX_CONCURRENT
+          value: "2"
+        - name: REQUEST_TIMEOUT
+          value: "120"
+        - name: MAX_RETRIES
+          value: "2"
+        - name: RETRY_DELAY
+          value: "2.0"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vlm-proxy
+  namespace: traffic-vlm
+spec:
+  selector:
+    app: vlm-proxy
+  ports:
+  - port: 8001
+    targetPort: 8001
+    name: http

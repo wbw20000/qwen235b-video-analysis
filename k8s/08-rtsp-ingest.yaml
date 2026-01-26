@@ -1,0 +1,212 @@
+# RTSP Ingest Deployment - 每摄像头一个 Pod
+# 示例: 147-A 摄像头
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rtsp-ingest-147a
+  namespace: traffic-vlm
+  labels:
+    app: rtsp-ingest
+    camera: "147-A"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rtsp-ingest
+      camera: "147-A"
+  template:
+    metadata:
+      labels:
+        app: rtsp-ingest
+        camera: "147-A"
+    spec:
+      containers:
+      - name: ingest
+        image: localhost:5000/rtsp-ingest:latest
+        args:
+        - "--camera-id"
+        - "147-A"
+        - "--rtsp-url"
+        - "rtsp://admin:baidu123@172.21.14.129:554/Streaming/Channels/102"
+        - "--output-dir"
+        - "/data1/videos/rtsp_recordings"
+        - "--segment-duration"
+        - "600"
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+---
+# Dispatcher for 147-A (阶段1.5 - 重叠窗口)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatcher-147a
+  namespace: traffic-vlm
+  labels:
+    app: dispatcher
+    camera: "147-A"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dispatcher
+      camera: "147-A"
+  template:
+    metadata:
+      labels:
+        app: dispatcher
+        camera: "147-A"
+    spec:
+      containers:
+      - name: dispatcher
+        image: localhost:5000/dispatcher:latest
+        args:
+        - "--camera-id"
+        - "147-A"
+        - "--input-dir"
+        - "/data1/videos/rtsp_recordings"
+        - "--output-dir"
+        - "/data1/videos/windows"
+        - "--overlap-sec"
+        - "30"
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+---
+# 示例: 147-G 摄像头
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rtsp-ingest-147g
+  namespace: traffic-vlm
+  labels:
+    app: rtsp-ingest
+    camera: "147-G"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rtsp-ingest
+      camera: "147-G"
+  template:
+    metadata:
+      labels:
+        app: rtsp-ingest
+        camera: "147-G"
+    spec:
+      containers:
+      - name: ingest
+        image: localhost:5000/rtsp-ingest:latest
+        args:
+        - "--camera-id"
+        - "147-G"
+        - "--rtsp-url"
+        - "rtsp://admin:baidu123@172.21.14.130:554/Streaming/Channels/102"
+        - "--output-dir"
+        - "/data1/videos/rtsp_recordings"
+        - "--segment-duration"
+        - "600"
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+---
+# Dispatcher for 147-G
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatcher-147g
+  namespace: traffic-vlm
+  labels:
+    app: dispatcher
+    camera: "147-G"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dispatcher
+      camera: "147-G"
+  template:
+    metadata:
+      labels:
+        app: dispatcher
+        camera: "147-G"
+    spec:
+      containers:
+      - name: dispatcher
+        image: localhost:5000/dispatcher:latest
+        args:
+        - "--camera-id"
+        - "147-G"
+        - "--input-dir"
+        - "/data1/videos/rtsp_recordings"
+        - "--output-dir"
+        - "/data1/videos/windows"
+        - "--overlap-sec"
+        - "30"
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos

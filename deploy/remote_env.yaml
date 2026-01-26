@@ -1,0 +1,119 @@
+# 远程服务器部署环境配置
+# 注意: 敏感信息通过环境变量引用，不要直接写入密码
+
+# 远程服务器连接信息
+remote:
+  host: "r6500-g4-2"  # 或 100.123.59.56 (Tailscale IP)
+  user: "bj"
+  port: 22
+  ssh_key: "${HOME}/.ssh/id_ed25519"
+  # sudo密码通过环境变量: REMOTE_SUDO_PASS
+
+# 服务器硬件配置
+hardware:
+  cpu:
+    model: "Intel Xeon Gold 5218R"
+    sockets: 2
+    cores: 40
+    threads: 80
+  memory:
+    total_gb: 376
+    type: "DDR4 ECC"
+  gpu:
+    model: "NVIDIA Tesla T4"
+    count: 8
+    memory_per_card_gb: 15
+    total_memory_gb: 120
+    driver: "590.48.01"
+    cuda: "13.1"
+  storage:
+    - path: "/data"
+      size_tb: 1.7
+      type: "NVMe"
+      purpose: "models"
+    - path: "/data1"
+      size_tb: 1.7
+      type: "NVMe"
+      purpose: "videos, results"
+
+# 目录规划
+directories:
+  models: "/data/models"
+  videos: "/data1/videos"
+  results: "/data1/results"
+  logs: "/data/logs"
+  app: "/data/app"
+
+# K8S 配置
+kubernetes:
+  namespace: "traffic-vlm"
+  version: "1.29"
+  cni: "flannel"
+  pod_network_cidr: "10.244.0.0/16"
+
+# 模型配置
+models:
+  vllm:
+    name: "Qwen/Qwen3-VL-32B-Instruct-AWQ"
+    local_path: "/data/models/qwen3-vl-32b-awq"
+    tensor_parallel: 2
+    max_model_len: 4096  # 保守值
+    gpu_memory_utilization: 0.85
+    max_num_seqs: 2
+  embedding:
+    name: "google/siglip-base-patch16-384"
+    local_path: "/data/models/siglip-base-patch16-384"
+
+# RTSP 摄像头配置 (用于端到端测试)
+rtsp:
+  username: "admin"
+  password: "baidu123"  # 测试环境，生产环境应使用环境变量
+  cameras:
+    - id: "147-A"
+      ip: "172.21.14.129"
+      stream: "102"  # 子码流
+      url: "rtsp://admin:baidu123@172.21.14.129:554/Streaming/Channels/102"
+    - id: "147-G"
+      ip: "172.21.14.130"
+      stream: "102"
+      url: "rtsp://admin:baidu123@172.21.14.130:554/Streaming/Channels/102"
+    - id: "146-A"
+      ip: "172.21.15.1"
+      stream: "102"
+      url: "rtsp://admin:baidu123@172.21.15.1:554/Streaming/Channels/102"
+
+# 网络配置
+network:
+  camera_subnet: "172.21.0.0/16"
+  note: "需要 VPN 或专线才能访问摄像头网段"
+
+# GPU 分配计划
+gpu_allocation:
+  embedding_service: [0]  # GPU 0
+  vllm_server: [2, 3]     # GPU 2-3 (tensor-parallel=2)
+  reserved: [1, 4, 5, 6, 7]  # 预留扩展
+
+# 服务端口
+ports:
+  api_gateway: 30500
+  vllm: 8000
+  embedding: 8080
+  redis: 6379
+  redis_exporter: 9121
+  dcgm_exporter: 9400
+
+# 分片与重叠窗口配置 (修正A)
+segmentation:
+  segment_duration_min: 10
+  overlap_duration_sec: 30
+  dedup_window_sec: 15
+
+# 凭据说明
+credentials_note: |
+  运行部署脚本前，请设置以下环境变量:
+  - REMOTE_SUDO_PASS: 远程服务器sudo密码
+  - HF_TOKEN: HuggingFace token (下载模型用)
+
+  示例:
+  export REMOTE_SUDO_PASS="your_sudo_password"
+  export HF_TOKEN="hf_xxxx"

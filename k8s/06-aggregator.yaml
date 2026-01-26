@@ -1,0 +1,80 @@
+# Aggregator Deployment - 结果去重 (阶段1.5)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator
+  namespace: traffic-vlm
+  labels:
+    app: aggregator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aggregator
+  template:
+    metadata:
+      labels:
+        app: aggregator
+    spec:
+      containers:
+      - name: aggregator
+        image: localhost:5000/aggregator:latest
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: AGGREGATED_DIR
+          value: "/data1/aggregated"
+        - name: DEDUP_WINDOW_SEC
+          value: "15"
+        - name: MAX_TASKS
+          value: "100"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        volumeMounts:
+        - name: results
+          mountPath: /data1/results
+          readOnly: true
+        - name: aggregated
+          mountPath: /data1/aggregated
+      volumes:
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: aggregated
+        hostPath:
+          path: /data1/aggregated
+          type: DirectoryOrCreate
+---
+# HPA for Aggregator
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aggregator-hpa
+  namespace: traffic-vlm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aggregator
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

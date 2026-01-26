@@ -1,0 +1,79 @@
+# Semantic Analyzer Deployment - 唯一编排者 (P0 必做)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: semantic-analyzer
+  namespace: traffic-vlm
+  labels:
+    app: semantic-analyzer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: semantic-analyzer
+  template:
+    metadata:
+      labels:
+        app: semantic-analyzer
+    spec:
+      containers:
+      - name: analyzer
+        image: localhost:5000/semantic-analyzer:latest
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: EMBEDDING_SERVICE_URL
+          value: "http://embedding-service.traffic-vlm.svc.cluster.local:8080"
+        - name: VLM_PROXY_URL
+          value: "http://vlm-proxy.traffic-vlm.svc.cluster.local:8001"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "50"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+---
+# HPA for Semantic Analyzer
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: semantic-analyzer-hpa
+  namespace: traffic-vlm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: semantic-analyzer
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

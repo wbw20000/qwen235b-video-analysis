@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""
+Embedding Service - SigLIP 向量编码服务
+- 独立 GPU Pod，整卡隔离
+- HTTP 接口供 Semantic Analyzer 调用
+- 向量缓存到 Redis
+- 支持 SigLIP/SigLIP2 热切换
+"""
+import os
+import sys
+import gc
+import json
+import base64
+import hashlib
+from io import BytesIO
+from pathlib import Path
+from typing import List, Optional
+from dataclasses import dataclass
+
+# 添加项目路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import torch
+import numpy as np
+from PIL import Image
+from flask import Flask, request, jsonify
+
+from workers.common.logging_config import setup_logger, LogContext
+
+# 配置
+MODEL_NAME = os.getenv("MODEL_NAME", "google/siglip-base-patch16-384")
+MODEL_PATH = os.getenv("MODEL_PATH", "/data/models/siglip-base-patch16-384")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+VECTOR_TTL = int(os.getenv("VECTOR_TTL", "3600"))  # 1小时
+MAX_REQUESTS_BEFORE_EXIT = int(os.getenv("MAX_REQUESTS", "1000"))
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "32"))
+
+app = Flask(__name__)
+logger = setup_logger("embedding-service")
+log = LogContext(logger, stage="embedding")
+
+
+class EmbeddingModel:
+    """SigLIP 模型封装"""
+
+    def __init__(self, model_path: str):
+        self.model_path = model_path
+        self.model = None
+        self.processor = None
+        self.device = None
+        self.request_count = 0
+
+    def load(self):
+        """加载模型"""
+        from transformers import AutoModel, AutoProcessor
+
+        log.info(f"加载模型: {self.model_path}")
+
+        # 选择设备
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda:0")
+            log.info(f"使用 GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            self.device = torch.device("cpu")
+            log.warning("GPU 不可用，使用 CPU")
+
+        # 加载模型
+        self.processor = AutoProcessor.from_pretrained(self.model_path)
+        self.model = AutoModel.from_pretrained(self.model_path)
+        self.model.to(self.device)
+        self.model.eval()
+
+        log.info("模型加载完成")
+
+    def encode_images(self, images: List[Image.Image]) -> np.ndarray:
+        """
+        批量编码图像为向量
+        返回: (N, D) 的 numpy 数组
+        """
+        if not images:
+            return np.array([])
+
+        self.request_count += 1
+
+        with torch.no_grad():
+            # 分批处理
+            all_embeddings = []
+            for i in range(0, len(images), BATCH_SIZE):
+                batch = images[i:i + BATCH_SIZE]
+
+                # 预处理
+                inputs = self.processor(
+                    images=batch,
+                    return_tensors="pt",
+                    padding=True
+                )
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                # 编码
+                outputs = self.model.get_image_features(**inputs)
+                embeddings = outputs.cpu().numpy()
+                all_embeddings.append(embeddings)
+
+                # 清理 GPU 缓存
+                del inputs, outputs
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            return np.vstack(all_embeddings) if all_embeddings else np.array([])
+
+    def encode_text(self, texts: List[str]) -> np.ndarray:
+        """
+        批量编码文本为向量
+        返回: (N, D) 的 numpy 数组
+        """
+        if not texts:
+            return np.array([])
+
+        with torch.no_grad():
+            inputs = self.processor(
+                text=texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=77
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            outputs = self.model.get_text_features(**inputs)
+            embeddings = outputs.cpu().numpy()
+
+            del inputs, outputs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            return embeddings
+
+
+# 全局模型实例
+model: Optional[EmbeddingModel] = None
+
+
+def init_model():
+    """初始化模型"""
+    global model
+    # 优先使用本地路径，否则使用 HuggingFace 模型名
+    path = MODEL_PATH if Path(MODEL_PATH).exists() else MODEL_NAME
+    model = EmbeddingModel(path)
+    model.load()
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """健康检查"""
+    return jsonify({
+        "status": "healthy",
+        "model": MODEL_NAME,
+        "device": str(model.device) if model else "not loaded",
+        "request_count": model.request_count if model else 0
+    })
+
+
+@app.route("/encode/images", methods=["POST"])
+def encode_images():
+    """
+    编码图像列表
+    请求体:
+    {
+        "images": ["base64_encoded_image_1", ...],
+        "job_id": "optional_job_id",
+        "trace_id": "optional_trace_id"
+    }
+    响应:
+    {
+        "embeddings": [[...], [...], ...],  # (N, D) 列表
+        "shape": [N, D]
+    }
+    """
+    if model is None:
+        return jsonify({"error": "Model not loaded"}), 503
+
+    data = request.json
+    if not data or "images" not in data:
+        return jsonify({"error": "Missing 'images' field"}), 400
+
+    job_id = data.get("job_id", "")
+    trace_id = data.get("trace_id", "")
+
+    try:
+        # 解码 base64 图像
+        images = []
+        for b64_img in data["images"]:
+            img_bytes = base64.b64decode(b64_img)
+            img = Image.open(BytesIO(img_bytes)).convert("RGB")
+            images.append(img)
+
+        log.info(
+            f"编码 {len(images)} 张图像",
+            job_id=job_id,
+            trace_id=trace_id
+        )
+
+        # 编码
+        embeddings = model.encode_images(images)
+
+        # 检查是否需要自愈退出
+        if model.request_count >= MAX_REQUESTS_BEFORE_EXIT:
+            log.info(f"达到请求阈值 ({MAX_REQUESTS_BEFORE_EXIT})，标记退出")
+            # 在 K8S 中，返回后进程会正常退出，由 K8S 重启
+
+        return jsonify({
+            "embeddings": embeddings.tolist(),
+            "shape": list(embeddings.shape)
+        })
+
+    except Exception as e:
+        log.error(f"编码失败: {e}", job_id=job_id, trace_id=trace_id)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/encode/text", methods=["POST"])
+def encode_text():
+    """
+    编码文本列表
+    请求体:
+    {
+        "texts": ["text_1", "text_2", ...]
+    }
+    响应:
+    {
+        "embeddings": [[...], [...], ...],
+        "shape": [N, D]
+    }
+    """
+    if model is None:
+        return jsonify({"error": "Model not loaded"}), 503
+
+    data = request.json
+    if not data or "texts" not in data:
+        return jsonify({"error": "Missing 'texts' field"}), 400
+
+    try:
+        texts = data["texts"]
+        log.info(f"编码 {len(texts)} 条文本")
+
+        embeddings = model.encode_text(texts)
+
+        return jsonify({
+            "embeddings": embeddings.tolist(),
+            "shape": list(embeddings.shape)
+        })
+
+    except Exception as e:
+        log.error(f"编码失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/similarity", methods=["POST"])
+def compute_similarity():
+    """
+    计算图像与文本的相似度
+    请求体:
+    {
+        "images": ["base64_image_1", ...],
+        "texts": ["text_1", ...],
+        "job_id": "optional",
+        "trace_id": "optional"
+    }
+    响应:
+    {
+        "similarities": [[sim_img1_text1, sim_img1_text2, ...], ...],  # (N_img, N_text)
+        "shape": [N_img, N_text]
+    }
+    """
+    if model is None:
+        return jsonify({"error": "Model not loaded"}), 503
+
+    data = request.json
+    if not data or "images" not in data or "texts" not in data:
+        return jsonify({"error": "Missing 'images' or 'texts' field"}), 400
+
+    job_id = data.get("job_id", "")
+    trace_id = data.get("trace_id", "")
+
+    try:
+        # 解码图像
+        images = []
+        for b64_img in data["images"]:
+            img_bytes = base64.b64decode(b64_img)
+            img = Image.open(BytesIO(img_bytes)).convert("RGB")
+            images.append(img)
+
+        texts = data["texts"]
+
+        log.info(
+            f"计算相似度: {len(images)} 图像 x {len(texts)} 文本",
+            job_id=job_id,
+            trace_id=trace_id
+        )
+
+        # 编码
+        img_embeddings = model.encode_images(images)
+        text_embeddings = model.encode_text(texts)
+
+        # 归一化
+        img_norm = img_embeddings / np.linalg.norm(img_embeddings, axis=1, keepdims=True)
+        text_norm = text_embeddings / np.linalg.norm(text_embeddings, axis=1, keepdims=True)
+
+        # 计算相似度
+        similarities = np.dot(img_norm, text_norm.T)
+
+        return jsonify({
+            "similarities": similarities.tolist(),
+            "shape": list(similarities.shape)
+        })
+
+    except Exception as e:
+        log.error(f"相似度计算失败: {e}", job_id=job_id, trace_id=trace_id)
+        return jsonify({"error": str(e)}), 500
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Embedding Service")
+    parser.add_argument("--host", default="0.0.0.0", help="监听地址")
+    parser.add_argument("--port", type=int, default=8080, help="监听端口")
+    args = parser.parse_args()
+
+    # 初始化模型
+    init_model()
+
+    # 启动服务
+    log.info(f"启动 Embedding Service: {args.host}:{args.port}")
+    app.run(host=args.host, port=args.port, threaded=True)
+
+
+if __name__ == "__main__":
+    main()

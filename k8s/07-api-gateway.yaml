@@ -1,0 +1,103 @@
+# API Gateway Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: traffic-vlm
+  labels:
+    app: api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: localhost:5000/api-gateway:latest
+        ports:
+        - containerPort: 5000
+          name: http
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: AGGREGATED_DIR
+          value: "/data1/aggregated"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        volumeMounts:
+        - name: results
+          mountPath: /data1/results
+          readOnly: true
+        - name: aggregated
+          mountPath: /data1/aggregated
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 30
+      volumes:
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: aggregated
+        hostPath:
+          path: /data1/aggregated
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: traffic-vlm
+spec:
+  type: NodePort
+  selector:
+    app: api-gateway
+  ports:
+  - port: 5000
+    targetPort: 5000
+    nodePort: 30500
+    name: http
+---
+# HPA for API Gateway
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  namespace: traffic-vlm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
