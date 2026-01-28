@@ -68,11 +68,18 @@ class DetectorConfig:
     imgsz: int = 1280  # 配置一: 检测图像尺寸
 
 
+def _get_default_vlm_model() -> str:
+    """获取默认VLM模型名：本地vLLM使用qwen3-vl-32b，云端使用qwen3-vl-plus"""
+    import os
+    if os.getenv("VLLM_BASE_URL"):
+        return os.getenv("VLLM_MODEL_NAME", "qwen3-vl-32b")
+    return "qwen3-vl-plus"
+
 @dataclass
 class VLMConfig:
-    """云端 VLM 配置。"""
+    """VLM 配置（支持本地vLLM和云端DashScope）。"""
 
-    model: str = "qwen3-vl-plus"
+    model: str = field(default_factory=_get_default_vlm_model)
     top_clips: int = 3
     annotated_frames_per_clip: int = 6
     accident_frames_per_clip: int = 12  # 事故模式：发送更多帧给VLM

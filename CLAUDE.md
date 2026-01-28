@@ -154,6 +154,56 @@ d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
 | S2帧数 | 18 | 升级分析增加帧数 |
 | SigLIP模型 | siglip-base-patch16-384 | 语义检索精度高 |
 
+## 远程服务器
+
+### r6500-g4-2 (GPU服务器)
+
+#### 基本信息
+| 项目 | 值 |
+|------|-----|
+| 主机名 | r6500-g4-2 |
+| IP | 100.123.59.56 (Tailscale) |
+| 用户名 | bj |
+| SSH密钥 | ~/.ssh/id_ed25519 |
+| sudo密码 | 1q2w3e |
+| 系统 | Ubuntu 22.04 (内核 6.8.0-90-generic) |
+
+#### CPU
+| 项目 | 配置 |
+|------|------|
+| 型号 | Intel Xeon Gold 5218R @ 2.10GHz |
+| 插槽 | 2 颗 |
+| 核心/线程 | 40核 / 80线程 |
+
+#### 显卡
+| 项目 | 配置 |
+|------|------|
+| 型号 | NVIDIA Tesla T4 |
+| 数量 | 8 张 |
+| 单卡显存 | 15 GB |
+| 总显存 | 120 GB |
+| 驱动版本 | 590.48.01 |
+| CUDA 版本 | 13.1 |
+
+#### 内存
+| 项目 | 配置 |
+|------|------|
+| 总容量 | 376 GB |
+| 类型 | DDR4 ECC |
+| 速度 | 3200 MT/s (运行 2666 MT/s) |
+| 配置 | 32GB × 12条 |
+
+#### 硬盘
+| 设备 | 容量 | 类型 | 挂载点 |
+|------|------|------|--------|
+| sda (三星 SSD) | 447 GB | SATA SSD | `/` (系统) |
+| sdb (三星 SSD) | 447 GB | SATA SSD | 未挂载 |
+| nvme0n1 (Intel P5520) | 1.7 TB | NVMe | `/data1` |
+| nvme1n1 (Intel P5520) | 1.7 TB | NVMe | `/data` |
+| **总存储** | **4.3 TB** | | |
+
+---
+
 ## 技术栈
 
 | 类别 | 技术 |
@@ -308,3 +358,59 @@ d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
 ### 备注
 
 性能提升空间有限（约 3-5%），属于边际改进，优先级最低。
+
+---
+
+## 远程部署 (r6500-g4-2 K8S)
+
+### 当前部署状态 (2026-01-26)
+
+| 组件 | 状态 | 部署方式 |
+|------|------|----------|
+| K8S 集群 | ✅ 运行中 | kubeadm 单节点 |
+| NVIDIA Device Plugin | ✅ 8 GPU 就绪 | DaemonSet |
+| Redis | ✅ 运行中 | K8S StatefulSet |
+| vLLM (Qwen3-VL-32B-AWQ) | ✅ 运行中 | nohup (端口 8000) |
+| Embedding Service | 待部署 | K8S Deployment |
+| API Gateway | 待部署 | K8S Deployment |
+
+### 关键路径
+
+| 项目 | 路径 |
+|------|------|
+| vLLM 日志 | `/data/logs/vllm.log` |
+| 模型文件 | `/data/models/tclf90/Qwen3-VL-32B-Instruct-AWQ/` |
+| SigLIP 模型 | `/data/models/siglip-base-patch16-384/` |
+| K8S 清单 | `/data/app/k8s/` |
+| Docker 构建 | `/data/app/docker/` |
+| 微服务代码 | `/data/app/workers/` |
+
+### Docker 镜像备份
+
+| 镜像 | 版本 | 下载日志 | 用途 |
+|------|------|----------|------|
+| vllm/vllm-openai | v0.6.6.post1 | 已下载 | 旧版本，不支持 Qwen3-VL |
+| vllm/vllm-openai | **v0.14.1** | `/tmp/vllm-v0.14.1-pull.log` | **推荐版本，支持 Qwen3-VL** |
+
+### vLLM 启动命令 (T4 兼容)
+
+```bash
+# T4 GPU 需要 TRITON_ATTN 后端 + enforce-eager
+CUDA_VISIBLE_DEVICES=2,3 \
+VLLM_ATTENTION_BACKEND=TRITON_ATTN \
+VLLM_USE_FLASHINFER_SAMPLER=0 \
+python -m vllm.entrypoints.openai.api_server \
+  --model /data/models/tclf90/Qwen3-VL-32B-Instruct-AWQ \
+  --served-model-name qwen3-vl-32b \
+  --tensor-parallel-size 2 \
+  --max-model-len 4096 \
+  --gpu-memory-utilization 0.85 \
+  --max-num-seqs 2 \
+  --port 8000 \
+  --trust-remote-code \
+  --enforce-eager
+```
+
+### K8S Service 命名规范
+
+**重要**: 避免使用 `vllm` 作为 Service 名称，因为 K8S 会自动生成 `VLLM_SERVICE_HOST` 等环境变量，与 vLLM 自身的 `VLLM_*` 变量冲突。建议使用 `llm-server` 或 `qwen-vl-server`。

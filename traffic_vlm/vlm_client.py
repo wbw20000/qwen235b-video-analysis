@@ -524,16 +524,25 @@ def _build_api_params(config, messages):
 
 class VLMClient:
     def __init__(self, config: VLMConfig, api_key: Optional[str] = None):
-        key = api_key or os.getenv("DASHSCOPE_API_KEY")
-        if not key:
-            raise ValueError("缺少 DASHSCOPE_API_KEY，无法调用云端 VLM")
-        base_url = os.getenv("DASHSCOPE_BASE_URL")
-        if not base_url:
-            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        # 优先使用本地 vLLM（通过 VLLM_BASE_URL 环境变量）
+        vllm_base_url = os.getenv("VLLM_BASE_URL")
+        if vllm_base_url:
+            # 本地 vLLM 模式：不需要真实 API key
+            key = os.getenv("VLLM_API_KEY", "EMPTY")
+            base_url = vllm_base_url
+        else:
+            # 云端 DashScope 模式
+            key = api_key or os.getenv("DASHSCOPE_API_KEY")
+            if not key:
+                raise ValueError("缺少 DASHSCOPE_API_KEY，无法调用云端 VLM")
+            base_url = os.getenv("DASHSCOPE_BASE_URL")
+            if not base_url:
+                base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         self.client = OpenAI(api_key=key, base_url=base_url)
         # 异步客户端（用于并发调用）
         self.async_client = AsyncOpenAI(api_key=key, base_url=base_url)
         self.config = config
+        self._using_local_vllm = bool(vllm_base_url)
 
     def build_user_prompt(
         self,
