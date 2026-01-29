@@ -30,11 +30,15 @@ class VideoTask:
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "VideoTask":
+        seg_end_ts_raw = data.get("seg_end_ts")
+        seg_end_ts = None
+        if seg_end_ts_raw and seg_end_ts_raw not in ("None", "null", ""):
+            seg_end_ts = int(seg_end_ts_raw)
         return cls(
             job_id=data["job_id"],
             camera_id=data["camera_id"],
             window_path=data["window_path"],
-            seg_end_ts=int(data["seg_end_ts"]) if data.get("seg_end_ts") else None,
+            seg_end_ts=seg_end_ts,
             trace_id=data["trace_id"],
             created_at=float(data.get("created_at", time.time())),
             analysis_type=data.get("analysis_type", "accident")  # 默认为事故检测
