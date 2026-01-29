@@ -1,0 +1,67 @@
+# 电动自行车违法检测分析器 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebike-violation-analyzer
+  namespace: traffic-vlm
+  labels:
+    app: ebike-violation-analyzer
+    analysis-type: ebike_violation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ebike-violation-analyzer
+  template:
+    metadata:
+      labels:
+        app: ebike-violation-analyzer
+        analysis-type: ebike_violation
+    spec:
+      containers:
+      - name: analyzer
+        image: localhost:5000/ebike-violation-analyzer:latest
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: EMBEDDING_SERVICE_URL
+          value: "http://embedding-service.traffic-vlm.svc.cluster.local:8080"
+        - name: VLM_PROXY_URL
+          value: "http://vlm-proxy.traffic-vlm.svc.cluster.local:8001"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "50"
+        - name: CLIP_SCORE_THRESHOLD
+          value: "0.35"
+        - name: FFMPEG_NVDEC_ENABLED
+          value: "true"
+        - name: FFMPEG_NVDEC_DEVICE
+          value: "5"  # 使用 GPU 5
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results

@@ -19,6 +19,7 @@ class VideoTask:
     trace_id: str
     seg_end_ts: int = None  # 可选字段
     created_at: float = None
+    analysis_type: str = "accident"  # 新增: 分析类型 (accident/mv_violation/ebike_violation/ads_behavior)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -35,7 +36,8 @@ class VideoTask:
             window_path=data["window_path"],
             seg_end_ts=int(data["seg_end_ts"]) if data.get("seg_end_ts") else None,
             trace_id=data["trace_id"],
-            created_at=float(data.get("created_at", time.time()))
+            created_at=float(data.get("created_at", time.time())),
+            analysis_type=data.get("analysis_type", "accident")  # 默认为事故检测
         )
 
 
@@ -51,6 +53,10 @@ class ResultTask:
     is_accident: bool
     seg_end_ts: int = None  # 可选字段
     created_at: float = None
+    analysis_type: str = "accident"  # 新增: 分析类型
+    is_positive: bool = False  # 新增: 通用阳性标志（违法/事故/异常行为）
+    violation_type: str = None  # 新增: 违法类型 (用于 mv_violation/ebike_violation)
+    behavior_type: str = None  # 新增: 行为类型 (用于 ads_behavior)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -59,6 +65,7 @@ class ResultTask:
     def to_dict(self) -> Dict[str, str]:
         d = asdict(self)
         d["is_accident"] = "1" if self.is_accident else "0"
+        d["is_positive"] = "1" if self.is_positive else "0"
         return {k: str(v) for k, v in d.items()}
 
     @classmethod
@@ -71,7 +78,11 @@ class ResultTask:
             result_path=data["result_path"],
             trace_id=data["trace_id"],
             is_accident=data.get("is_accident", "0") == "1",
-            created_at=float(data.get("created_at", time.time()))
+            created_at=float(data.get("created_at", time.time())),
+            analysis_type=data.get("analysis_type", "accident"),
+            is_positive=data.get("is_positive", "0") == "1",
+            violation_type=data.get("violation_type") if data.get("violation_type") != "None" else None,
+            behavior_type=data.get("behavior_type") if data.get("behavior_type") != "None" else None
         )
 
 
