@@ -75,6 +75,7 @@ class FrameInfo:
     embedding: Optional[np.ndarray] = None
     similarity_score: float = 0.0
     accident_template_hit: bool = False
+    tmpdir: str = None  # 临时目录路径，用于清理
 
 
 @dataclass
@@ -149,7 +150,7 @@ class SemanticAnalyzer:
     ) -> List[FrameInfo]:
         """
         从视频提取帧
-        使用 ffmpeg 抽帧到临时目录
+        使用 ffmpeg 抽帧到持久临时目录
         """
         import tempfile
         import subprocess
@@ -161,43 +162,44 @@ class SemanticAnalyzer:
             log.error(f"视频不存在: {video_path}", job_id=job_id)
             return frames
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir = Path(tmpdir)
+        # 创建持久临时目录 (帧处理完成后由调用方清理)
+        tmpdir = Path(tempfile.mkdtemp())
 
-            # 使用 ffmpeg 抽帧
-            output_pattern = str(tmpdir / "frame_%04d.jpg")
-            cmd = [
-                "ffmpeg",
-                "-i", str(video_path),
-                "-vf", f"fps={fps}",
-                "-q:v", "2",
-                output_pattern
-            ]
+        # 使用 ffmpeg 抽帧
+        output_pattern = str(tmpdir / "frame_%04d.jpg")
+        cmd = [
+            "ffmpeg",
+            "-i", str(video_path),
+            "-vf", f"fps={fps}",
+            "-q:v", "2",
+            output_pattern
+        ]
 
-            try:
-                result = subprocess.run(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=120
-                )
-                if result.returncode != 0:
-                    log.error(f"ffmpeg 抽帧失败: {result.stderr.decode()[-500:]}", job_id=job_id)
-                    return frames
-            except Exception as e:
-                log.error(f"抽帧异常: {e}", job_id=job_id)
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120
+            )
+            if result.returncode != 0:
+                log.error(f"ffmpeg 抽帧失败: {result.stderr.decode()[-500:]}", job_id=job_id)
                 return frames
+        except Exception as e:
+            log.error(f"抽帧异常: {e}", job_id=job_id)
+            return frames
 
-            # 收集帧文件
-            frame_files = sorted(tmpdir.glob("frame_*.jpg"))
-            for idx, frame_file in enumerate(frame_files):
-                frames.append(FrameInfo(
-                    frame_idx=idx,
-                    timestamp_sec=idx / fps,
-                    frame_path=str(frame_file)
-                ))
+        # 收集帧文件
+        frame_files = sorted(tmpdir.glob("frame_*.jpg"))
+        for idx, frame_file in enumerate(frame_files):
+            frames.append(FrameInfo(
+                frame_idx=idx,
+                timestamp_sec=idx / fps,
+                frame_path=str(frame_file),
+                tmpdir=str(tmpdir)  # 存储临时目录以便后续清理
+            ))
 
-            log.info(f"抽取 {len(frames)} 帧 @ {fps} fps", job_id=job_id, trace_id=trace_id)
+        log.info(f"抽取 {len(frames)} 帧 @ {fps} fps", job_id=job_id, trace_id=trace_id)
 
         return frames
 
@@ -282,6 +284,7 @@ class SemanticAnalyzer:
             # 取最大相似度
             max_sim = float(np.max(similarities))
             frame.similarity_score = max_sim
+            log.info(f"帧 {frame.frame_idx} 相似度: {max_sim:.4f}", job_id=job_id, trace_id=trace_id)
             frame.accident_template_hit = max_sim > 0.3  # 阈值
 
         return frames
@@ -289,7 +292,7 @@ class SemanticAnalyzer:
     def _cluster_frames_to_clips(
         self,
         frames: List[FrameInfo],
-        threshold: float = 0.35,
+        threshold: float = 0.08,
         min_gap_sec: float = 5.0,
         job_id: str = "",
         trace_id: str = ""
@@ -568,6 +571,7 @@ class SemanticAnalyzer:
 
             # 7. 发送结果任务
             result_task = ResultTask(
+                event_time=task.seg_end_ts or time.time(),
                 job_id=job_id,
                 camera_id=task.camera_id,
                 trace_id=trace_id,

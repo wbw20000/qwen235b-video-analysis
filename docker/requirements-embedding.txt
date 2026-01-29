@@ -1,6 +1,8 @@
 # Embedding Service 依赖
-transformers>=4.36.0
+transformers==4.57.3
 pillow>=9.5.0
 numpy>=1.24.0
 flask>=2.3.0
 redis>=4.5.0
+sentencepiece
+protobuf

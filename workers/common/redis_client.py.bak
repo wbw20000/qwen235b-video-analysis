@@ -16,8 +16,8 @@ class VideoTask:
     job_id: str
     camera_id: str
     window_path: str
+    seg_end_ts: int
     trace_id: str
-    seg_end_ts: int = None  # 可选字段
     created_at: float = None
 
     def __post_init__(self):
@@ -33,7 +33,7 @@ class VideoTask:
             job_id=data["job_id"],
             camera_id=data["camera_id"],
             window_path=data["window_path"],
-            seg_end_ts=int(data["seg_end_ts"]) if data.get("seg_end_ts") else None,
+            seg_end_ts=int(data["seg_end_ts"]),
             trace_id=data["trace_id"],
             created_at=float(data.get("created_at", time.time()))
         )
@@ -49,7 +49,6 @@ class ResultTask:
     result_path: str
     trace_id: str
     is_accident: bool
-    seg_end_ts: int = None  # 可选字段
     created_at: float = None
 
     def __post_init__(self):
@@ -145,25 +144,15 @@ class RedisStreamClient:
         group = group or consumer_group
         consumer = consumer or consumer_name
         block = block_ms if block_ms is not None else block
-        """读取视频任务（阻塞模式）先读pending再读新消息"""
+        """读取视频任务（阻塞模式）"""
         self.ensure_consumer_group(self.STREAM_VIDEO_TASKS, group)
-        # 先尝试读取pending消息 (未ACK的)
         result = self.client.xreadgroup(
             group,
             consumer,
-            {self.STREAM_VIDEO_TASKS: "0"},  # 读取pending
+            {self.STREAM_VIDEO_TASKS: ">"},
             count=count,
-            block=0  # 不阻塞
+            block=block
         )
-        # 如果没有pending，再读新消息
-        if not result or not result[0][1]:
-            result = self.client.xreadgroup(
-                group,
-                consumer,
-                {self.STREAM_VIDEO_TASKS: ">"},  # 读取新消息
-                count=count,
-                block=block
-            )
         if not result:
             return []
         # 解析结果

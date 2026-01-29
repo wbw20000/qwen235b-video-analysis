@@ -1,0 +1,8 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+RUN pip install --no-cache-dir redis prometheus_client
+COPY redis_streams_exporter.py .
+
+EXPOSE 9122
+CMD ["python", "redis_streams_exporter.py"]

@@ -4,61 +4,29 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
 venv/
-ENV/
-env/
-.venv/
+*.egg-info/
+.eggs/
 
-# Flask
-instance/
-.webassets-cache
-
-# Uploads folder
+# Data directories
+data/video_results/
+data/vlm_logs/
+data/camera-1/
+data/index.db*
 uploads/
-*.mp4
-*.avi
-*.mkv
-*.mov
-*.flv
-*.wmv
+outputs/
+temp/
+
+# Logs
+*.log
+logs/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Environment variables
-.env
-.env.local
-
-# Logs
-*.log
-
-# TrafficVLM
-data/
-*.db
-yolov8n.pt
-API-KEY.txt

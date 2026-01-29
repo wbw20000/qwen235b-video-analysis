@@ -24,7 +24,7 @@ class StreamConfig:
 class EmbeddingConfig:
     """SigLIP 编码与向量检索配置。"""
 
-    model_name: str = "google/siglip-base-patch16-384"
+    model_name: str = "/data/models/siglip-base-patch16-384"
     device: str = "auto"
     batch_size: int = 16  # 优化：从8改为16，加速SigLIP嵌入计算
     top_m_per_template: int = 80
