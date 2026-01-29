@@ -341,10 +341,10 @@ class Aggregator:
             try:
                 # 批量读取结果任务
                 tasks = self.redis.read_result_tasks(
-                    consumer_group=CONSUMER_GROUP,
-                    consumer_name=CONSUMER_NAME,
+                    group=CONSUMER_GROUP,
+                    consumer=CONSUMER_NAME,
                     count=BATCH_SIZE,
-                    block_ms=5000
+                    block=5000
                 )
 
                 for msg_id, task in tasks:

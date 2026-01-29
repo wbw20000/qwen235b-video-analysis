@@ -42,6 +42,9 @@ CONSUMER_GROUP = "semantic_analyzers"
 CONSUMER_NAME = os.getenv("HOSTNAME", f"analyzer_{os.getpid()}")
 MAX_TASKS_BEFORE_EXIT = int(os.getenv("MAX_TASKS", "50"))
 TASK_TIMEOUT_SEC = 300  # 单任务超时
+CLIP_SCORE_THRESHOLD = float(os.getenv("CLIP_SCORE_THRESHOLD", "0.35"))  # VLM调用阈值
+FFMPEG_NVDEC_ENABLED = os.getenv("FFMPEG_NVDEC_ENABLED", "true").lower() == "true"  # GPU解码开关
+FFMPEG_NVDEC_DEVICE = os.getenv("FFMPEG_NVDEC_DEVICE", "0")  # GPU设备ID
 
 # 事故模板（用于 SigLIP 相似度匹配）
 ACCIDENT_TEMPLATES = [
@@ -165,15 +168,29 @@ class SemanticAnalyzer:
         # 创建持久临时目录 (帧处理完成后由调用方清理)
         tmpdir = Path(tempfile.mkdtemp())
 
-        # 使用 ffmpeg 抽帧
+        # 使用 ffmpeg 抽帧 (支持 NVDEC GPU 解码加速)
         output_pattern = str(tmpdir / "frame_%04d.jpg")
-        cmd = [
-            "ffmpeg",
-            "-i", str(video_path),
-            "-vf", f"fps={fps}",
-            "-q:v", "2",
-            output_pattern
-        ]
+
+        if FFMPEG_NVDEC_ENABLED:
+            # GPU 解码: -hwaccel cuda 启用 NVIDIA 硬件加速
+            cmd = [
+                "ffmpeg",
+                "-hwaccel", "cuda",
+                "-hwaccel_device", FFMPEG_NVDEC_DEVICE,
+                "-i", str(video_path),
+                "-vf", f"fps={fps}",
+                "-q:v", "2",
+                output_pattern
+            ]
+        else:
+            # CPU 解码 (回退模式)
+            cmd = [
+                "ffmpeg",
+                "-i", str(video_path),
+                "-vf", f"fps={fps}",
+                "-q:v", "2",
+                output_pattern
+            ]
 
         try:
             result = subprocess.run(
@@ -199,7 +216,8 @@ class SemanticAnalyzer:
                 tmpdir=str(tmpdir)  # 存储临时目录以便后续清理
             ))
 
-        log.info(f"抽取 {len(frames)} 帧 @ {fps} fps", job_id=job_id, trace_id=trace_id)
+        decode_mode = f"GPU:{FFMPEG_NVDEC_DEVICE}" if FFMPEG_NVDEC_ENABLED else "CPU"
+        log.info(f"抽取 {len(frames)} 帧 @ {fps} fps ({decode_mode})", job_id=job_id, trace_id=trace_id)
 
         return frames
 
@@ -559,11 +577,18 @@ class SemanticAnalyzer:
             if clips:
                 # 选择最高分片段
                 best_clip = max(clips, key=lambda c: c.clip_score)
-                keyframes = self._select_keyframes(best_clip, max_frames=12, job_id=job_id, trace_id=trace_id)
-                best_clip.keyframes = keyframes
 
-                # 调用 VLM
-                vlm_result = self._call_vlm(keyframes, job_id=job_id, trace_id=trace_id)
+                # 只有超过阈值才调用 VLM
+                if best_clip.clip_score >= CLIP_SCORE_THRESHOLD:
+                    log.info(f"最高分片段 {best_clip.clip_score:.3f} >= 阈值 {CLIP_SCORE_THRESHOLD}, 调用 VLM",
+                             job_id=job_id, trace_id=trace_id)
+                    keyframes = self._select_keyframes(best_clip, max_frames=12, job_id=job_id, trace_id=trace_id)
+                    best_clip.keyframes = keyframes
+                    vlm_result = self._call_vlm(keyframes, job_id=job_id, trace_id=trace_id)
+                else:
+                    log.info(f"最高分片段 {best_clip.clip_score:.3f} < 阈值 {CLIP_SCORE_THRESHOLD}, 跳过 VLM",
+                             job_id=job_id, trace_id=trace_id)
+                    vlm_result = {"judgment": "NO", "confidence": 1.0, "reason": f"最高分 {best_clip.clip_score:.3f} 低于阈值"}
 
             # 6. 保存结果
             processing_time = time.time() - start_time
