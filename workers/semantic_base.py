@@ -654,7 +654,8 @@ class SemanticAnalyzerBase(ABC):
                             f"跳过任务: analysis_type={task.analysis_type} != {self.analysis_type}",
                             job_id=task.job_id
                         )
-                        # 不 ACK，让其他分析器处理
+                        # ACK 不匹配的消息（每个 consumer group 独立，无法让其他分析器处理）
+                        self.redis.ack_video_task(self.consumer_group, msg_id)
                         continue
 
                     if self.process_task(task):
