@@ -1,0 +1,10 @@
+# Edge Trigger 依赖
+numpy>=1.24.0
+requests>=2.28.0
+Pillow>=9.0.0
+
+# 可选: ONNX Runtime (CPU-only 模式)
+# onnxruntime>=1.15.0
+
+# 可选: transformers (仅用于 processor)
+# transformers>=4.30.0

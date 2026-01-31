@@ -46,6 +46,48 @@ class VideoTask:
 
 
 @dataclass
+class EdgeEvent:
+    """edge_events 消息结构 - 边缘触发事件"""
+    camera_id: str
+    timestamp: int  # Unix timestamp
+    similarity_score: float
+    keyframe_count: int
+    keyframes_base64: List[str]  # 关键帧 base64 编码
+    window_path: str
+    trigger_time: str  # ISO 格式时间
+    trace_id: str = ""
+    created_at: float = None
+
+    def __post_init__(self):
+        if self.created_at is None:
+            self.created_at = time.time()
+        if not self.trace_id:
+            self.trace_id = f"{self.camera_id}_{self.timestamp}"
+
+    def to_dict(self) -> Dict[str, str]:
+        d = asdict(self)
+        d["keyframes_base64"] = json.dumps(d["keyframes_base64"])  # JSON 序列化列表
+        return {k: str(v) for k, v in d.items()}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, str]) -> "EdgeEvent":
+        keyframes = data.get("keyframes_base64", "[]")
+        if isinstance(keyframes, str):
+            keyframes = json.loads(keyframes)
+        return cls(
+            camera_id=data["camera_id"],
+            timestamp=int(data["timestamp"]),
+            similarity_score=float(data["similarity_score"]),
+            keyframe_count=int(data["keyframe_count"]),
+            keyframes_base64=keyframes,
+            window_path=data["window_path"],
+            trigger_time=data["trigger_time"],
+            trace_id=data.get("trace_id", ""),
+            created_at=float(data.get("created_at", time.time()))
+        )
+
+
+@dataclass
 class ResultTask:
     """result_tasks 消息结构"""
     job_id: str
@@ -95,6 +137,7 @@ class RedisStreamClient:
 
     STREAM_VIDEO_TASKS = "video_tasks"
     STREAM_RESULT_TASKS = "result_tasks"
+    STREAM_EDGE_EVENTS = "edge_events"  # 边缘触发事件队列
     STREAM_DLQ = "dlq_tasks"
 
     MAX_STREAM_LEN = 10000
@@ -230,6 +273,55 @@ class RedisStreamClient:
     def ack_result_task(self, group: str, msg_id: str):
         """确认结果任务处理完成"""
         self.client.xack(self.STREAM_RESULT_TASKS, group, msg_id)
+
+    # === edge_events 操作 ===
+
+    def add_edge_event(self, event: EdgeEvent) -> str:
+        """添加边缘触发事件到队列"""
+        msg_id = self.client.xadd(
+            self.STREAM_EDGE_EVENTS,
+            event.to_dict(),
+            maxlen=self.MAX_STREAM_LEN
+        )
+        return msg_id
+
+    def read_edge_events(
+        self,
+        group: str,
+        consumer: str,
+        count: int = 1,
+        block: int = 5000
+    ) -> List[tuple]:
+        """读取边缘触发事件"""
+        self.ensure_consumer_group(self.STREAM_EDGE_EVENTS, group)
+        # 先尝试读取pending消息
+        result = self.client.xreadgroup(
+            group,
+            consumer,
+            {self.STREAM_EDGE_EVENTS: "0"},
+            count=count,
+            block=0
+        )
+        # 如果没有pending，再读新消息
+        if not result or not result[0][1]:
+            result = self.client.xreadgroup(
+                group,
+                consumer,
+                {self.STREAM_EDGE_EVENTS: ">"},
+                count=count,
+                block=block
+            )
+        if not result:
+            return []
+        tasks = []
+        for stream_name, messages in result:
+            for msg_id, data in messages:
+                tasks.append((msg_id, EdgeEvent.from_dict(data)))
+        return tasks
+
+    def ack_edge_event(self, group: str, msg_id: str):
+        """确认边缘事件处理完成"""
+        self.client.xack(self.STREAM_EDGE_EVENTS, group, msg_id)
 
     # === 任务状态管理 ===
 
