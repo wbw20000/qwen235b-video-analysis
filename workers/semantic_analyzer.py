@@ -46,23 +46,35 @@ CLIP_SCORE_THRESHOLD = float(os.getenv("CLIP_SCORE_THRESHOLD", "0.35"))  # VLM�
 FFMPEG_NVDEC_ENABLED = os.getenv("FFMPEG_NVDEC_ENABLED", "true").lower() == "true"  # GPU解码开关
 FFMPEG_NVDEC_DEVICE = os.getenv("FFMPEG_NVDEC_DEVICE", "0")  # GPU设备ID
 
-# 事故模板（用于 SigLIP 相似度匹配）
+# 事故模板（用于 SigLIP 相似度匹配）- 中文模板与本地 config.py 保持一致
 ACCIDENT_TEMPLATES = [
-    "car accident",
-    "vehicle collision",
-    "traffic crash",
-    "car crash",
-    "pedestrian hit by car",
-    "motorcycle accident",
-    "bicycle accident",
-    "rollover accident",
-    "rear-end collision",
-    "head-on collision",
-    "side impact collision",
-    "hit and run",
-    "car hitting pedestrian",
-    "vehicle overturned",
-    "traffic accident scene"
+    # 机动车之间事故
+    "路口画面两辆机动车发生碰撞",
+    "监控视频中汽车之间发生碰撞",
+    "机动车追尾前车",
+    "两车相撞，车辆受损",
+    "十字路口车辆侧面碰撞",
+    # 机动车与二轮车事故
+    "路口画面机动车与二轮车发生碰撞",
+    "监控视频中汽车与电动车发生碰撞",
+    "机动车与自行车发生接触",
+    "汽车与摩托车碰撞后骑车人摔倒",
+    "路口机动车撞到电动车",
+    # 机动车与行人事故
+    "路口画面机动车与行人发生碰撞",
+    "监控视频中汽车撞到行人",
+    "机动车在人行横道撞到行人",
+    "车辆与行人发生交通事故",
+    # 多车事故
+    "路口画面多车连环相撞",
+    "监控视频中三辆或以上车辆连环相撞",
+    "多车连撞事故",
+    "车辆连环追尾事故",
+    # 肇事逃逸
+    "发生交通事故后车辆逃离现场",
+    "肇事车辆逃逸",
+    "碰撞后未停车离开",
+    "事故后司机驾车逃逸",
 ]
 
 logger = setup_logger("semantic-analyzer")

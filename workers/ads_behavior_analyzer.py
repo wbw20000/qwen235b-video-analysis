@@ -31,32 +31,69 @@ from workers.semantic_base import (
 )
 
 
-# 自动驾驶行为语义模板
+# 自动驾驶行为语义模板 (扩展版 - 50+ 模板)
 ADS_BEHAVIOR_TEMPLATES = [
-    # 示廓灯/标识灯
+    # === 示廓灯/标识灯 (Marker Lights) - 核心检测目标 ===
     "vehicle with marker lights on",
     "car with side lights illuminated",
     "autonomous vehicle indicator lights",
     "self-driving car with lights on",
     "AV marker lights visible",
+    "vehicle with roof lights",
+    "car with top warning lights",
+    "vehicle with yellow marker light",
+    "car with identification lights",
+    "test vehicle with indicator lamp",
+    "vehicle with amber beacon",
+    "car with caution lights on roof",
+    "vehicle equipped with warning beacon",
+    "autonomous vehicle with yellow light bar",
 
-    # 自动驾驶车辆特征
+    # === 自动驾驶车辆特征 (AV Characteristics) ===
     "autonomous vehicle on road",
     "self-driving car",
     "vehicle with sensors on roof",
     "car with lidar sensor",
+    "vehicle with camera array",
+    "autonomous test vehicle",
+    "robotaxi on street",
+    "driverless car",
+    "vehicle with radar sensors",
+    "car with sensor pod on top",
+    "AV with perception sensors",
+    "waymo style vehicle",
+    "test autonomous car",
 
-    # 行为模式
+    # === 行为模式 (Behavior Patterns) ===
     "vehicle stopping suddenly",
     "car making unusual turn",
     "vehicle changing speed abruptly",
     "car taking unusual path",
     "vehicle in autonomous mode",
+    "car hesitating at intersection",
+    "vehicle with jerky movement",
+    "car maintaining precise lane position",
+    "vehicle with smooth trajectory",
+    "car yielding to pedestrians",
+    "vehicle making cautious turn",
+    "car decelerating gradually",
 
-    # 交互场景
+    # === 交互场景 (Interaction Scenarios) ===
     "autonomous car at intersection",
     "self-driving vehicle near pedestrians",
-    "AV interacting with traffic"
+    "AV interacting with traffic",
+    "autonomous vehicle merging",
+    "self-driving car at crosswalk",
+    "AV navigating traffic",
+    "test vehicle in urban environment",
+    "autonomous car changing lanes",
+    "self-driving vehicle at traffic light",
+
+    # === 异常行为 (Abnormal Behaviors) ===
+    "vehicle stopped in middle of road",
+    "car making erratic movements",
+    "vehicle with disengagement event",
+    "autonomous car failure scenario"
 ]
 
 

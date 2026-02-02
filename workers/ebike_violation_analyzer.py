@@ -25,43 +25,95 @@ sys.path.insert(0, PROJECT_ROOT)
 from workers.semantic_base import SemanticAnalyzerBase, AnalysisResult
 
 
-# 电动自行车违法语义模板
+# 电动自行车违法语义模板 (扩展版 - 70+ 模板)
 EBIKE_VIOLATION_TEMPLATES = [
-    # 闯红灯
+    # === 闯红灯 (Red Light Running) ===
     "electric scooter running red light",
     "e-bike ignoring traffic signal",
     "bicycle crossing on red",
     "two-wheeler running red light",
+    "motorcycle passing red light",
+    "scooter violating traffic signal",
+    "cyclist running red light",
+    "motorbike ignoring stop signal",
 
-    # 逆行
+    # === 逆行 (Wrong Way Driving) ===
     "e-bike driving wrong way",
     "electric scooter against traffic",
     "bicycle on wrong side of road",
     "two-wheeler going opposite direction",
+    "motorcycle driving against flow",
+    "scooter in oncoming lane",
+    "cyclist traveling wrong direction",
+    "e-bike on contraflow",
 
-    # 载人超员
+    # === 载人超员 (Overloading Passengers) ===
     "e-bike with multiple passengers",
     "electric scooter carrying extra person",
     "overloaded bicycle with passengers",
     "two-wheeler with too many riders",
+    "motorcycle with three people",
+    "e-bike with two passengers",
+    "scooter overloaded with people",
+    "two people on electric bicycle",
+    "multiple riders on scooter",
+    "e-bike carrying adult passenger",
 
-    # 不戴头盔
+    # === 不戴头盔 (No Helmet) - 重点扩展 ===
     "e-bike rider without helmet",
     "electric scooter no helmet",
     "unhelmeted cyclist",
     "motorcycle rider not wearing helmet",
+    "rider without safety helmet",
+    "no helmet on e-bike",
+    "scooter driver without helmet",
+    "cyclist not wearing helmet",
+    "bare head motorcycle rider",
+    "e-bike passenger no helmet",
+    "unhelmeted scooter rider",
+    "person on e-bike without helmet",
+    "helmet violation on motorcycle",
+    "motorcycle without helmet",
+    "electric bike no helmet",
+    "two-wheeler rider no protective gear",
+    "missing helmet on e-bike",
+    "rider head unprotected",
+    "no helmet electric scooter",
+    "scooter passenger without helmet",
 
-    # 占用机动车道
+    # === 占用机动车道 (Illegal Lane Use) ===
     "e-bike in car lane",
     "electric scooter on motorway",
     "bicycle in vehicle lane",
     "two-wheeler blocking traffic lane",
+    "motorcycle in fast lane",
+    "e-bike on highway",
+    "scooter in main road",
+    "cyclist on motor vehicle lane",
+    "e-bike in middle lane",
+    "two-wheeler in car-only lane",
 
-    # 违法载货
+    # === 违法载货 (Illegal Cargo) ===
     "overloaded e-bike with cargo",
     "electric scooter carrying large items",
     "bicycle with oversized load",
-    "two-wheeler with dangerous cargo"
+    "two-wheeler with dangerous cargo",
+    "e-bike with excessive cargo",
+    "scooter carrying bulky items",
+    "motorcycle with unstable load",
+    "e-bike hauling furniture",
+    "overloaded delivery scooter",
+
+    # === 打伞骑行 (Umbrella While Riding) ===
+    "e-bike rider holding umbrella",
+    "cyclist with umbrella",
+    "scooter rider using umbrella",
+    "one-handed riding with umbrella",
+
+    # === 其他违法 ===
+    "e-bike running on sidewalk",
+    "scooter on pedestrian path",
+    "electric bike phone while riding"
 ]
 
 

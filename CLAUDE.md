@@ -414,3 +414,61 @@ python -m vllm.entrypoints.openai.api_server \
 ### K8S Service 命名规范
 
 **重要**: 避免使用 `vllm` 作为 Service 名称，因为 K8S 会自动生成 `VLLM_SERVICE_HOST` 等环境变量，与 vLLM 自身的 `VLLM_*` 变量冲突。建议使用 `llm-server` 或 `qwen-vl-server`。
+
+---
+
+## RTSP 视频流监控配置
+
+### 摄像头列表 (29路)
+
+RTSP URL 格式: `rtsp://admin:baidu123@{IP}:554/Streaming/Channels/102?transportmode=unicast`
+
+| 路口编号 | IP 地址 | RTSP URL |
+|---------|---------|----------|
+| 147-01 | 172.21.14.129 | rtsp://admin:baidu123@172.21.14.129:554/Streaming/Channels/102?transportmode=unicast |
+| 147-02 | 172.21.14.130 | rtsp://admin:baidu123@172.21.14.130:554/Streaming/Channels/102?transportmode=unicast |
+| 147-03 | 172.21.14.131 | rtsp://admin:baidu123@172.21.14.131:554/Streaming/Channels/102?transportmode=unicast |
+| 147-04 | 172.21.14.132 | rtsp://admin:baidu123@172.21.14.132:554/Streaming/Channels/102?transportmode=unicast |
+| 147-05 | 172.21.14.133 | rtsp://admin:baidu123@172.21.14.133:554/Streaming/Channels/102?transportmode=unicast |
+| 147-06 | 172.21.14.134 | rtsp://admin:baidu123@172.21.14.134:554/Streaming/Channels/102?transportmode=unicast |
+| 147-07 | 172.21.14.136 | rtsp://admin:baidu123@172.21.14.136:554/Streaming/Channels/102?transportmode=unicast |
+| 147-08 | 172.21.14.137 | rtsp://admin:baidu123@172.21.14.137:554/Streaming/Channels/102?transportmode=unicast |
+| 147-09 | 172.21.14.139 | rtsp://admin:baidu123@172.21.14.139:554/Streaming/Channels/102?transportmode=unicast |
+| 147-10 | 172.21.14.140 | rtsp://admin:baidu123@172.21.14.140:554/Streaming/Channels/102?transportmode=unicast |
+| 147-11 | 172.21.14.141 | rtsp://admin:baidu123@172.21.14.141:554/Streaming/Channels/102?transportmode=unicast |
+| 146-01 | 172.21.15.1 | rtsp://admin:baidu123@172.21.15.1:554/Streaming/Channels/102?transportmode=unicast |
+| 146-02 | 172.21.15.2 | rtsp://admin:baidu123@172.21.15.2:554/Streaming/Channels/102?transportmode=unicast |
+| 146-03 | 172.21.15.3 | rtsp://admin:baidu123@172.21.15.3:554/Streaming/Channels/102?transportmode=unicast |
+| 146-04 | 172.21.15.4 | rtsp://admin:baidu123@172.21.15.4:554/Streaming/Channels/102?transportmode=unicast |
+| 146-05 | 172.21.15.5 | rtsp://admin:baidu123@172.21.15.5:554/Streaming/Channels/102?transportmode=unicast |
+| 146-06 | 172.21.15.7 | rtsp://admin:baidu123@172.21.15.7:554/Streaming/Channels/102?transportmode=unicast |
+| 146-07 | 172.21.15.8 | rtsp://admin:baidu123@172.21.15.8:554/Streaming/Channels/102?transportmode=unicast |
+| 146-08 | 172.21.15.9 | rtsp://admin:baidu123@172.21.15.9:554/Streaming/Channels/102?transportmode=unicast |
+| 146-09 | 172.21.15.12 | rtsp://admin:baidu123@172.21.15.12:554/Streaming/Channels/102?transportmode=unicast |
+| 146-10 | 172.21.15.13 | rtsp://admin:baidu123@172.21.15.13:554/Streaming/Channels/102?transportmode=unicast |
+| 146-11 | 172.21.15.14 | rtsp://admin:baidu123@172.21.15.14:554/Streaming/Channels/102?transportmode=unicast |
+| 146-12 | 172.21.15.15 | rtsp://admin:baidu123@172.21.15.15:554/Streaming/Channels/102?transportmode=unicast |
+| 146-13 | 172.21.15.16 | rtsp://admin:baidu123@172.21.15.16:554/Streaming/Channels/102?transportmode=unicast |
+| 146-14 | 172.21.15.19 | rtsp://admin:baidu123@172.21.15.19:554/Streaming/Channels/102?transportmode=unicast |
+| 146-15 | 172.21.15.20 | rtsp://admin:baidu123@172.21.15.20:554/Streaming/Channels/102?transportmode=unicast |
+| 146-16 | 172.21.15.21 | rtsp://admin:baidu123@172.21.15.21:554/Streaming/Channels/102?transportmode=unicast |
+| 146-17 | 172.21.15.22 | rtsp://admin:baidu123@172.21.15.22:554/Streaming/Channels/102?transportmode=unicast |
+| 146-18 | 172.21.15.23 | rtsp://admin:baidu123@172.21.15.23:554/Streaming/Channels/102?transportmode=unicast |
+
+### 监控参数
+
+| 参数 | 值 |
+|------|-----|
+| 用户名 | admin |
+| 密码 | baidu123 |
+| 端口 | 554 |
+| 通道 | Channels/102 |
+| 传输模式 | unicast |
+
+### 汇总报告配置
+
+| 项目 | 设置 |
+|------|------|
+| 报告周期 | 每 4 小时 |
+| 报告内容 | 事故检测统计、违法行为统计、系统健康状态 |
+| 存储位置 | `/data/app/outputs/reports/` |

@@ -25,43 +25,87 @@ sys.path.insert(0, PROJECT_ROOT)
 from workers.semantic_base import SemanticAnalyzerBase, AnalysisResult
 
 
-# 机动车违法语义模板
+# 机动车违法语义模板 (扩展版 - 60+ 模板)
 MV_VIOLATION_TEMPLATES = [
-    # 闯红灯
+    # === 闯红灯 (Red Light Running) ===
     "car running red light",
     "vehicle ignoring traffic signal",
     "car crossing on red",
     "running a red light at intersection",
+    "vehicle passing through red traffic light",
+    "car entering intersection on red signal",
+    "red light violation",
+    "traffic signal violation by car",
+    "vehicle failing to stop at red light",
+    "car ignoring stop signal",
 
-    # 违法变道
+    # === 违法变道 (Illegal Lane Change) ===
     "illegal lane change",
     "unsafe lane change",
     "car cutting across multiple lanes",
     "vehicle changing lanes without signal",
+    "lane change across solid line",
+    "cutting off other vehicles",
+    "aggressive lane change",
+    "vehicle crossing solid white line",
+    "car weaving through traffic",
+    "sudden lane change without indication",
+    "dangerous overtaking maneuver",
 
-    # 压线行驶
+    # === 压线行驶 (Lane Line Violation) ===
     "car crossing lane markings",
     "vehicle on lane line",
     "driving on road markings",
     "car straddling lanes",
+    "vehicle driving on solid line",
+    "car partially in two lanes",
+    "lane marking violation",
+    "vehicle touching lane divider",
 
-    # 逆行
+    # === 逆行 (Wrong Way Driving) ===
     "wrong way driving",
     "car driving against traffic",
     "vehicle going opposite direction",
     "driving on wrong side of road",
+    "vehicle in oncoming lane",
+    "car heading into traffic",
+    "contraflow driving",
+    "vehicle traveling wrong direction",
+    "driving against traffic flow",
 
-    # 违法停车
+    # === 违法停车 (Illegal Parking) ===
     "illegal parking",
     "car parked in no parking zone",
     "vehicle blocking traffic",
     "double parking",
+    "parking on sidewalk",
+    "vehicle in emergency lane",
+    "car blocking crosswalk",
+    "parking in bus lane",
+    "stopping in intersection",
+    "vehicle in no stopping zone",
 
-    # 不礼让行人
+    # === 不礼让行人 (Failing to Yield to Pedestrians) ===
     "car not yielding to pedestrian",
     "vehicle crossing crosswalk with pedestrians",
     "car ignoring pedestrian crossing",
-    "not stopping for pedestrian"
+    "not stopping for pedestrian",
+    "vehicle entering zebra crossing with people",
+    "car rushing through pedestrian crossing",
+    "failing to yield at crosswalk",
+    "vehicle endangering pedestrians",
+    "car passing pedestrians on crosswalk",
+
+    # === 超速 (Speeding - 通用) ===
+    "vehicle speeding",
+    "car driving too fast",
+    "excessive speed",
+    "high speed driving",
+
+    # === 压黄线 (Yellow Line Violation) ===
+    "crossing yellow line",
+    "vehicle over yellow marking",
+    "car on yellow center line"
 ]
 
 
