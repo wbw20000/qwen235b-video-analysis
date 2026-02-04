@@ -36,9 +36,9 @@ spec:
         - containerPort: 8080
           name: http
         env:
-        # 限制只使用 GPU 0,1,2，避免与 vLLM (GPU 4-7) 冲突
+        # 使用 GPU 0-3，vLLM 固定使用 GPU 6,7
         - name: CUDA_VISIBLE_DEVICES
-          value: "0,1,2"
+          value: "0,1,2,3"
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
         - name: REDIS_PORT

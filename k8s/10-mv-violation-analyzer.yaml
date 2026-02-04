@@ -48,7 +48,7 @@ spec:
         - name: FFMPEG_NVDEC_ENABLED
           value: "true"
         - name: FFMPEG_NVDEC_DEVICE
-          value: "4"  # 使用 GPU 4
+          value: "0"  # 使用 GPU 0
         - name: HOSTNAME
           valueFrom:
             fieldRef:
