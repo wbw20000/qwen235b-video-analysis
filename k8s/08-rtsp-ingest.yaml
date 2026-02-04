@@ -22,7 +22,8 @@ spec:
     spec:
       containers:
       - name: ingest
-        image: localhost:5000/rtsp-ingest:latest
+        image: localhost:5000/semantic-analyzer:v8
+        command: ["python", "-m", "workers.rtsp_ingest"]
         args:
         - "--camera-id"
         - "147-A"
@@ -31,7 +32,7 @@ spec:
         - "--output-dir"
         - "/data1/videos/rtsp_recordings"
         - "--segment-duration"
-        - "600"
+        - "60"
         env:
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
@@ -75,7 +76,8 @@ spec:
     spec:
       containers:
       - name: dispatcher
-        image: localhost:5000/dispatcher:latest
+        image: localhost:5000/semantic-analyzer:v8
+        command: ["python", "-m", "workers.dispatcher"]
         args:
         - "--camera-id"
         - "147-A"
@@ -84,12 +86,9 @@ spec:
         - "--output-dir"
         - "/data1/videos/windows"
         - "--overlap-sec"
-        - "30"
-        env:
-        - name: REDIS_HOST
-          value: "redis.traffic-vlm.svc.cluster.local"
-        - name: REDIS_PORT
-          value: "6379"
+        - "10"
+        - "--redis-host"
+        - "redis.traffic-vlm.svc.cluster.local"
         resources:
           requests:
             cpu: "500m"
@@ -128,7 +127,8 @@ spec:
     spec:
       containers:
       - name: ingest
-        image: localhost:5000/rtsp-ingest:latest
+        image: localhost:5000/semantic-analyzer:v8
+        command: ["python", "-m", "workers.rtsp_ingest"]
         args:
         - "--camera-id"
         - "147-G"
@@ -137,7 +137,7 @@ spec:
         - "--output-dir"
         - "/data1/videos/rtsp_recordings"
         - "--segment-duration"
-        - "600"
+        - "60"
         env:
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
@@ -181,7 +181,8 @@ spec:
     spec:
       containers:
       - name: dispatcher
-        image: localhost:5000/dispatcher:latest
+        image: localhost:5000/semantic-analyzer:v8
+        command: ["python", "-m", "workers.dispatcher"]
         args:
         - "--camera-id"
         - "147-G"
@@ -190,12 +191,9 @@ spec:
         - "--output-dir"
         - "/data1/videos/windows"
         - "--overlap-sec"
-        - "30"
-        env:
-        - name: REDIS_HOST
-          value: "redis.traffic-vlm.svc.cluster.local"
-        - name: REDIS_PORT
-          value: "6379"
+        - "10"
+        - "--redis-host"
+        - "redis.traffic-vlm.svc.cluster.local"
         resources:
           requests:
             cpu: "500m"

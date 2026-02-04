@@ -24,8 +24,8 @@ from workers.common.logging_config import setup_logger, LogContext
 from workers.common.redis_client import RedisStreamClient, VideoTask
 
 # 配置
-SEGMENT_DURATION_SEC = 600  # 10 分钟
-OVERLAP_DURATION_SEC = 30   # 30 秒重叠
+SEGMENT_DURATION_SEC = 60   # 60 秒实时监测
+OVERLAP_DURATION_SEC = 10   # 10 秒重叠
 POLL_INTERVAL_SEC = 5       # 轮询间隔
 MAX_TASKS_BEFORE_EXIT = 100 # 自愈阈值
 

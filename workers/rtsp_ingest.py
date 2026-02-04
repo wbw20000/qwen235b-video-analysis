@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from workers.common.logging_config import setup_logger, LogContext
 
 # 配置
-SEGMENT_DURATION_SEC = 600  # 10 分钟
+SEGMENT_DURATION_SEC = 60   # 60 秒实时监测
 MAX_SEGMENTS_BEFORE_EXIT = 50  # 自愈：处理 50 个分片后退出
 RECONNECT_DELAY_SEC = 5
 
