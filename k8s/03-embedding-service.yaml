@@ -1,4 +1,5 @@
-# Embedding Service Deployment - SigLIP (1×T4 GPU 整卡隔离)
+# Embedding Service Deployment - SigLIP (3×T4 GPU 水平扩展)
+# 每个 Pod 使用 1 个 GPU，K8S Service 自动负载均衡
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,7 +20,7 @@ metadata:
   labels:
     app: embedding-service
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: embedding-service
@@ -30,11 +31,14 @@ spec:
     spec:
       containers:
       - name: embedding
-        image: localhost:5000/embedding-service:latest
+        image: localhost:5000/embedding-service:v17
         ports:
         - containerPort: 8080
           name: http
         env:
+        # 限制只使用 GPU 0,1,2，避免与 vLLM (GPU 4-7) 冲突
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0,1,2"
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
         - name: REDIS_PORT
@@ -111,23 +115,24 @@ spec:
     targetPort: 8080
     name: http
 ---
-# HPA for Embedding Service (可扩展到 3 个实例)
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: embedding-service-hpa
-  namespace: traffic-vlm
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: embedding-service
-  minReplicas: 1
-  maxReplicas: 3
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
+# HPA 已禁用 - 固定 3 副本，每副本 1 GPU
+# 如需动态扩展，需使用 GPU 指标 (nvidia-device-plugin metrics)
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: embedding-service-hpa
+#   namespace: traffic-vlm
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: embedding-service
+#   minReplicas: 1
+#   maxReplicas: 3
+#   metrics:
+#   - type: Resource
+#     resource:
+#       name: cpu
+#       target:
+#         type: Utilization
+#         averageUtilization: 70

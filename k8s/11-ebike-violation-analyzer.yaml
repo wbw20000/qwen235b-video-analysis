@@ -1,27 +1,29 @@
-# 电动自行车违法检测分析器 Deployment
+# 电动自行车违法检测分析器 v2 Deployment
+# 使用 ebike_v2_analyzer.py - 包含 margin 评分、Top-M 门控、摄像头冷却
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ebike-violation-analyzer
+  name: ebike-v2-analyzer
   namespace: traffic-vlm
   labels:
-    app: ebike-violation-analyzer
+    app: ebike-v2-analyzer
     analysis-type: ebike_violation
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ebike-violation-analyzer
+      app: ebike-v2-analyzer
   template:
     metadata:
       labels:
-        app: ebike-violation-analyzer
+        app: ebike-v2-analyzer
         analysis-type: ebike_violation
     spec:
       containers:
       - name: analyzer
-        image: localhost:5000/ebike-violation-analyzer:latest
+        image: localhost:5000/semantic-analyzer:v8
         imagePullPolicy: Always
+        command: ["python", "-m", "workers.ebike_v2_analyzer"]
         env:
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
@@ -37,6 +39,13 @@ spec:
           value: "50"
         - name: CLIP_SCORE_THRESHOLD
           value: "0.35"
+        # MOG2 运动检测配置
+        - name: USE_MOG2_FILTER
+          value: "true"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
         - name: FFMPEG_NVDEC_ENABLED
           value: "true"
         - name: FFMPEG_NVDEC_DEVICE
