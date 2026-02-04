@@ -20,8 +20,9 @@ spec:
     spec:
       containers:
       - name: analyzer
-        image: localhost:5000/mv-violation-analyzer:latest
+        image: localhost:5000/semantic-analyzer:v8
         imagePullPolicy: Always
+        command: ["python", "-m", "workers.mv_violation_analyzer"]
         env:
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
@@ -37,6 +38,13 @@ spec:
           value: "50"
         - name: CLIP_SCORE_THRESHOLD
           value: "0.35"
+        # MOG2 运动检测配置
+        - name: USE_MOG2_FILTER
+          value: "true"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
         - name: FFMPEG_NVDEC_ENABLED
           value: "true"
         - name: FFMPEG_NVDEC_DEVICE

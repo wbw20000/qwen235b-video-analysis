@@ -26,6 +26,7 @@ import subprocess
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import cv2
 import requests
 import numpy as np
 
@@ -43,6 +44,16 @@ MAX_TASKS_BEFORE_EXIT = int(os.getenv("MAX_TASKS", "50"))
 CLIP_SCORE_THRESHOLD = float(os.getenv("CLIP_SCORE_THRESHOLD", "0.35"))
 FFMPEG_NVDEC_ENABLED = os.getenv("FFMPEG_NVDEC_ENABLED", "true").lower() == "true"
 FFMPEG_NVDEC_DEVICE = os.getenv("FFMPEG_NVDEC_DEVICE", "0")
+
+# MOG2 运动检测配置
+USE_MOG2_FILTER = os.getenv("USE_MOG2_FILTER", "true").lower() == "true"
+MOG2_FG_RATIO_THRESHOLD = float(os.getenv("MOG2_FG_RATIO_THRESHOLD", "0.015"))
+MOG2_LOWRES_WIDTH = int(os.getenv("MOG2_LOWRES_WIDTH", "640"))
+MOG2_LOWRES_HEIGHT = int(os.getenv("MOG2_LOWRES_HEIGHT", "360"))
+MOG2_LOWRES_FPS = float(os.getenv("MOG2_LOWRES_FPS", "12"))
+MOG2_DEBOUNCE_FRAMES = int(os.getenv("MOG2_DEBOUNCE_FRAMES", "3"))
+MOG2_ALWAYS_SAMPLE_INTERVAL = float(os.getenv("MOG2_ALWAYS_SAMPLE_INTERVAL", "5.0"))
+# 移除 MOG2_MAX_FRAMES 限制 - GPU 已扩展，无需采样限制
 
 
 @dataclass
@@ -228,6 +239,163 @@ class SemanticAnalyzerBase(ABC):
 
         decode_mode = f"GPU:{FFMPEG_NVDEC_DEVICE}" if FFMPEG_NVDEC_ENABLED else "CPU"
         self.log.info(f"抽取 {len(frames)} 帧 @ {fps} fps ({decode_mode})", job_id=job_id, trace_id=trace_id)
+
+        return frames
+
+    def extract_frames_with_mog2(
+        self,
+        video_path: str,
+        job_id: str = "",
+        trace_id: str = ""
+    ) -> List[FrameInfo]:
+        """使用 MOG2 运动检测提取关键帧（取代 1fps 固定抽帧）
+
+        流程：
+        1. 低分辨率 (640×360 @ 12fps) 读取视频
+        2. MOG2 检测运动触发点 (fg_ratio >= 0.015)
+        3. 仅在触发点提取高清帧
+
+        优势：过滤 90%+ 静止画面，只处理有运动的帧
+        """
+        frames = []
+        video_path = Path(video_path)
+
+        if not video_path.exists():
+            self.log.error(f"视频不存在: {video_path}", job_id=job_id)
+            return frames
+
+        # 创建临时目录
+        tmpdir = Path(tempfile.mkdtemp())
+
+        try:
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                self.log.error(f"无法打开视频: {video_path}", job_id=job_id)
+                return frames
+
+            # 获取视频属性
+            orig_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # 计算低分辨率采样间隔
+            sample_interval = max(1, int(orig_fps / MOG2_LOWRES_FPS))
+
+            self.log.info(
+                f"MOG2 运动检测: {orig_width}x{orig_height}@{orig_fps:.1f}fps -> "
+                f"{MOG2_LOWRES_WIDTH}x{MOG2_LOWRES_HEIGHT}@{MOG2_LOWRES_FPS}fps, "
+                f"interval={sample_interval}",
+                job_id=job_id, trace_id=trace_id
+            )
+
+            # 初始化 MOG2
+            bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+                history=400, varThreshold=16, detectShadows=True
+            )
+
+            motion_streak = 0
+            trigger_timestamps = []
+            last_force_ts = -1e9
+            frame_idx = 0
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # 跳帧采样
+                if frame_idx % sample_interval != 0:
+                    frame_idx += 1
+                    continue
+
+                timestamp = frame_idx / orig_fps
+
+                # 缩小到低分辨率
+                lowres = cv2.resize(frame, (MOG2_LOWRES_WIDTH, MOG2_LOWRES_HEIGHT))
+                gray = cv2.cvtColor(lowres, cv2.COLOR_BGR2GRAY)
+                gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+                # MOG2 运动检测
+                fg_mask = bg_subtractor.apply(gray)
+                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                fg_ratio = np.count_nonzero(fg_mask) / fg_mask.size
+
+                # 检测运动触发
+                if fg_ratio >= MOG2_FG_RATIO_THRESHOLD:
+                    motion_streak += 1
+                else:
+                    motion_streak = 0
+
+                triggered = False
+
+                # 连续帧触发（防抖）
+                if motion_streak >= MOG2_DEBOUNCE_FRAMES:
+                    triggered = True
+                    motion_streak = 0
+
+                # 强制采样兜底
+                if timestamp - last_force_ts >= MOG2_ALWAYS_SAMPLE_INTERVAL:
+                    triggered = True
+                    last_force_ts = timestamp
+
+                if triggered:
+                    trigger_timestamps.append((frame_idx, timestamp, fg_ratio))
+
+                frame_idx += 1
+
+            cap.release()
+
+            self.log.info(
+                f"MOG2 触发 {len(trigger_timestamps)} 个时间点 (共 {total_frames} 帧)",
+                job_id=job_id, trace_id=trace_id
+            )
+
+            if not trigger_timestamps:
+                self.log.warning("MOG2 无触发点，跳过", job_id=job_id)
+                return frames
+
+            # GPU 已扩展，不再限制帧数
+
+            # 第二遍：仅在触发点提取高清帧
+            cap = cv2.VideoCapture(str(video_path))
+            trigger_set = {t[0] for t in trigger_timestamps}
+
+            frame_idx = 0
+            saved_count = 0
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if frame_idx in trigger_set:
+                    # 保存高清帧
+                    frame_path = str(tmpdir / f"frame_{saved_count:04d}.jpg")
+                    cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+                    timestamp = frame_idx / orig_fps
+                    frames.append(FrameInfo(
+                        frame_idx=saved_count,
+                        timestamp_sec=timestamp,
+                        frame_path=frame_path,
+                        tmpdir=str(tmpdir)
+                    ))
+                    saved_count += 1
+
+                frame_idx += 1
+
+            cap.release()
+
+            self.log.info(
+                f"MOG2 提取 {len(frames)} 帧 (过滤 {100 * (1 - len(frames) / max(1, total_frames / sample_interval)):.1f}% 静止帧)",
+                job_id=job_id, trace_id=trace_id
+            )
+
+        except Exception as e:
+            self.log.error(f"MOG2 抽帧异常: {e}", job_id=job_id, trace_id=trace_id)
+            import traceback
+            self.log.error(traceback.format_exc())
 
         return frames
 
@@ -528,8 +696,12 @@ class SemanticAnalyzerBase(ABC):
         try:
             self.redis.set_task_status(job_id, "processing", self.consumer_name)
 
-            # 1. 抽帧
-            frames = self.extract_frames(task.window_path, fps=1.0, job_id=job_id, trace_id=trace_id)
+            # 1. 抽帧（MOG2 运动检测 或 1fps 固定抽帧）
+            if USE_MOG2_FILTER:
+                frames = self.extract_frames_with_mog2(task.window_path, job_id=job_id, trace_id=trace_id)
+            else:
+                frames = self.extract_frames(task.window_path, fps=1.0, job_id=job_id, trace_id=trace_id)
+
             if not frames:
                 self.log.warning("抽帧为空，标记完成", job_id=job_id)
                 self.redis.set_task_status(job_id, "done", self.consumer_name)
