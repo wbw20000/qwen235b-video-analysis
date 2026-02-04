@@ -16,6 +16,22 @@ import signal
 import json
 import base64
 import hashlib
+import cv2
+
+def compress_image_for_vlm(image_path: str, max_size: int = 640, quality: int = 85) -> bytes:
+    """压缩图片以发送给VLM (使用cv2)"""
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"无法读取图片: {image_path}")
+    h, w = img.shape[:2]
+    if max(w, h) > max_size:
+        scale = max_size / max(w, h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    _, buffer = cv2.imencode(".jpg", img, encode_param)
+    return buffer.tobytes()
+
 import gzip
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -33,10 +49,10 @@ from workers.common.logging_config import setup_logger, LogContext
 from workers.common.redis_client import RedisStreamClient, VideoTask, ResultTask
 
 # 配置
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_HOST = os.getenv("REDIS_HOST", "10.104.10.203")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "http://localhost:8080")
-VLM_PROXY_URL = os.getenv("VLM_PROXY_URL", "http://localhost:8001")
+EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "http://10.96.40.236:8080")
+VLM_PROXY_URL = os.getenv("VLM_PROXY_URL", "http://10.99.201.98:8001")
 RESULTS_DIR = os.getenv("RESULTS_DIR", "/data1/results")
 CONSUMER_GROUP = "semantic_analyzers"
 CONSUMER_NAME = os.getenv("HOSTNAME", f"analyzer_{os.getpid()}")
@@ -252,8 +268,8 @@ class SemanticAnalyzer:
 
         for i, frame in enumerate(frames):
             try:
-                with open(frame.frame_path, "rb") as f:
-                    img_bytes = f.read()
+                # 使用压缩函数
+                img_bytes = compress_image_for_vlm(frame.frame_path)
                 images_b64.append(base64.b64encode(img_bytes).decode())
                 valid_indices.append(i)
             except Exception as e:
@@ -407,8 +423,8 @@ class SemanticAnalyzer:
         images_b64 = []
         for frame in keyframes:
             try:
-                with open(frame.frame_path, "rb") as f:
-                    img_bytes = f.read()
+                # 使用压缩函数
+                img_bytes = compress_image_for_vlm(frame.frame_path)
                 images_b64.append(base64.b64encode(img_bytes).decode())
             except Exception as e:
                 log.warning(f"读取关键帧失败: {frame.frame_path}, {e}")
