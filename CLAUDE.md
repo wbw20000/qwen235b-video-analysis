@@ -139,6 +139,34 @@ d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
   --output-dir outputs/run_xxx --dump-video-results
 ```
 
+### SSH 远程执行注意事项
+
+**教训 (2026-02-04)**: SSH 后台执行 + 环境变量导出 = 容易失败
+
+**错误做法**:
+```bash
+# 环境变量不会传递给 nohup 子进程！
+ssh user@host "/path/to/script.sh &"
+```
+
+**正确做法**:
+```bash
+# 让脚本本身处理后台化，SSH 等待脚本初始化完成
+ssh user@host "bash /path/to/script.sh"
+# 脚本内部用 nohup ... & 实现后台运行
+```
+
+**原因**: 通过 SSH 非交互式后台执行时，脚本中 `export` 的环境变量可能**无法传递给 nohup 子进程**，导致 `CUDA_VISIBLE_DEVICES` 等关键配置失效。
+
+**vLLM 启动脚本示例** (`/data/app/start_vllm.sh`):
+```bash
+#!/bin/bash
+export CUDA_VISIBLE_DEVICES=6,7  # 在脚本内设置
+export VLLM_ATTENTION_BACKEND=TRITON_ATTN
+nohup python -m vllm.entrypoints.openai.api_server ... &  # 脚本内后台化
+echo "vLLM started"  # 脚本返回
+```
+
 ---
 
 ## 关键参数设定
