@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from urllib.parse import quote
 """
 Semantic Analyzer - 唯一编排者（P0 必做）
 - 消费 video_tasks 队列
@@ -464,7 +465,7 @@ class SemanticAnalyzer:
                 },
                 headers={
                     "X-Trace-Id": trace_id,
-                    "X-Job-Id": job_id
+                    "X-Job-Id": quote(job_id, safe="")
                 },
                 timeout=120
             )
