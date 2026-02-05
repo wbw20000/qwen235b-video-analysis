@@ -72,11 +72,11 @@ spec:
           requests:
             cpu: "2"
             memory: "8Gi"
-            nvidia.com/gpu: "1"
+            # 不使用 nvidia.com/gpu，避免 Device Plugin 随机分配到 vLLM 的 GPU 4-7
+            # 靠 CUDA_VISIBLE_DEVICES=0,1,2,3 控制 GPU 选择
           limits:
             cpu: "4"
             memory: "16Gi"
-            nvidia.com/gpu: "1"
         volumeMounts:
         - name: models
           mountPath: /models

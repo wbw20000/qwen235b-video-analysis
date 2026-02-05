@@ -804,7 +804,7 @@ class SemanticAnalyzerBase(ABC):
         self.load_template_embeddings()
 
         while self.running:
-            if self.task_count >= MAX_TASKS_BEFORE_EXIT:
+            if MAX_TASKS_BEFORE_EXIT > 0 and self.task_count >= MAX_TASKS_BEFORE_EXIT:
                 self.log.info(f"达到自愈阈值 ({MAX_TASKS_BEFORE_EXIT})，准备退出")
                 break
 

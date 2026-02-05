@@ -4,8 +4,8 @@
 
 set -e
 
-# 固定 GPU 6,7
-export CUDA_VISIBLE_DEVICES=6,7
+# 固定 GPU 4,5,6,7
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export VLLM_ATTENTION_BACKEND=TRITON_ATTN
 export VLLM_USE_FLASHINFER_SAMPLER=0
 
@@ -20,17 +20,17 @@ if pgrep -f "vllm.entrypoints.openai.api_server" > /dev/null; then
     sleep 5
 fi
 
-echo "启动 vLLM (GPU 6,7, TP=2)..."
+echo "启动 vLLM (GPU 4,5,6,7, TP=4, max-seqs=6)..."
 cd /data/app
 source venv/bin/activate
 
 nohup python -m vllm.entrypoints.openai.api_server \
   --model /data/models/tclf90/Qwen3-VL-32B-Instruct-AWQ \
   --served-model-name qwen3-vl-32b \
-  --tensor-parallel-size 2 \
+  --tensor-parallel-size 4 \
   --max-model-len 4096 \
   --gpu-memory-utilization 0.85 \
-  --max-num-seqs 2 \
+  --max-num-seqs 6 \
   --port 8000 \
   --trust-remote-code \
   --enforce-eager \
@@ -38,4 +38,4 @@ nohup python -m vllm.entrypoints.openai.api_server \
 
 echo "vLLM 已启动，PID: $!"
 echo "日志: $LOG_DIR/vllm.log"
-echo "GPU: 6,7 (TP=2)"
+echo "GPU: 4,5,6,7 (TP=4, max-seqs=6)"

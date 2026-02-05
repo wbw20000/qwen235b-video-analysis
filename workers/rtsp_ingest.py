@@ -24,6 +24,7 @@ from workers.common.logging_config import setup_logger, LogContext
 SEGMENT_DURATION_SEC = 60   # 60 秒实时监测
 MAX_SEGMENTS_BEFORE_EXIT = 50  # 自愈：处理 50 个分片后退出
 RECONNECT_DELAY_SEC = 5
+RETAIN_HOURS = float(os.getenv("RTSP_RETAIN_HOURS", "2"))  # 保留最近 N 小时的分片
 
 
 class RTSPIngest:
@@ -104,6 +105,34 @@ class RTSPIngest:
             self.log.error(f"录制异常: {e}")
             return False
 
+    def _cleanup_old_segments(self):
+        """
+        清理超过保留时间的旧分片
+        文件名格式: seg_{timestamp}.mp4
+        """
+        if RETAIN_HOURS <= 0:
+            return  # 禁用清理
+
+        cutoff_ts = int(time.time()) - int(RETAIN_HOURS * 3600)
+        deleted_count = 0
+
+        try:
+            for f in self.output_dir.glob("seg_*.mp4"):
+                # 从文件名提取时间戳
+                try:
+                    ts_str = f.stem.split("_")[1]
+                    file_ts = int(ts_str)
+                    if file_ts < cutoff_ts:
+                        f.unlink()
+                        deleted_count += 1
+                except (IndexError, ValueError):
+                    continue  # 跳过格式不对的文件
+
+            if deleted_count > 0:
+                self.log.info(f"清理旧分片: 删除 {deleted_count} 个 (保留 {RETAIN_HOURS}h)")
+        except Exception as e:
+            self.log.error(f"清理旧分片失败: {e}")
+
     def _atomic_rename(self, tmp_path: Path, final_path: Path) -> bool:
         """
         原子重命名：确保文件完整后才可见
@@ -154,6 +183,9 @@ class RTSPIngest:
                     self.log.info(
                         f"已完成 {self.segment_count}/{MAX_SEGMENTS_BEFORE_EXIT} 分片"
                     )
+                    # 每 10 个分片清理一次旧文件
+                    if self.segment_count % 10 == 0:
+                        self._cleanup_old_segments()
             else:
                 # 录制失败，清理临时文件并重试
                 if tmp_path.exists():

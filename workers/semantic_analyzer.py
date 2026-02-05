@@ -632,7 +632,8 @@ class SemanticAnalyzer:
                 result_path=str(result_path),
                 is_accident=vlm_result.get("judgment") == "YES",
                 confidence=vlm_result.get("confidence", 0.0),
-                seg_end_ts=task.seg_end_ts
+                seg_end_ts=task.seg_end_ts,
+                processing_time_sec=processing_time
             )
             self.redis.add_result_task(result_task)
 
@@ -661,7 +662,7 @@ class SemanticAnalyzer:
 
         while self.running:
             # 检查自愈阈值
-            if self.task_count >= MAX_TASKS_BEFORE_EXIT:
+            if MAX_TASKS_BEFORE_EXIT > 0 and self.task_count >= MAX_TASKS_BEFORE_EXIT:
                 log.info(f"达到自愈阈值 ({MAX_TASKS_BEFORE_EXIT})，准备退出")
                 break
 

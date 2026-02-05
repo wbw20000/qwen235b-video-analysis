@@ -103,6 +103,7 @@ class ResultTask:
     is_positive: bool = False  # 新增: 通用阳性标志（违法/事故/异常行为）
     violation_type: str = None  # 新增: 违法类型 (用于 mv_violation/ebike_violation)
     behavior_type: str = None  # 新增: 行为类型 (用于 ads_behavior)
+    processing_time_sec: float = 0.0  # 实际处理耗时(秒)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -128,7 +129,8 @@ class ResultTask:
             analysis_type=data.get("analysis_type", "accident"),
             is_positive=data.get("is_positive", "0") == "1",
             violation_type=data.get("violation_type") if data.get("violation_type") != "None" else None,
-            behavior_type=data.get("behavior_type") if data.get("behavior_type") != "None" else None
+            behavior_type=data.get("behavior_type") if data.get("behavior_type") != "None" else None,
+            processing_time_sec=float(data.get("processing_time_sec", 0.0)),
         )
 
 
@@ -140,7 +142,7 @@ class RedisStreamClient:
     STREAM_EDGE_EVENTS = "edge_events"  # 边缘触发事件队列
     STREAM_DLQ = "dlq_tasks"
 
-    MAX_STREAM_LEN = 10000
+    MAX_STREAM_LEN = 0  # 0 = no limit
     STATUS_TTL = 7 * 24 * 3600  # 7 days
 
     def __init__(
@@ -183,7 +185,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_VIDEO_TASKS,
             task.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         # 更新任务状态
         self.set_task_status(task.job_id, "pending")
@@ -242,7 +244,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_RESULT_TASKS,
             task.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         return msg_id
 
@@ -281,7 +283,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_EDGE_EVENTS,
             event.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         return msg_id
 
