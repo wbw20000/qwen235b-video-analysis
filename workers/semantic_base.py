@@ -4,8 +4,8 @@ Semantic Analyzer 基类 - 多语义检测共享逻辑
 支持: accident, mv_violation, ebike_violation, ads_behavior
 
 设计原则:
-- 不修改现有 accident 检测逻辑
-- 复用 Embedding + VLM 调用链
+- FFmpeg NVDEC GPU 解码 + CUDA MOG2 运动检测 (单低分辨率遍 + 触发帧提取)
+- 帧压缩 (640px + JPEG 85) 降低 Embedding/VLM 传输开销
 - 每个分析类型独立模板和 prompt
 """
 import os
@@ -42,8 +42,9 @@ VLM_PROXY_URL = os.getenv("VLM_PROXY_URL", "http://localhost:8001")
 RESULTS_DIR = os.getenv("RESULTS_DIR", "/data1/results")
 MAX_TASKS_BEFORE_EXIT = int(os.getenv("MAX_TASKS", "50"))
 CLIP_SCORE_THRESHOLD = float(os.getenv("CLIP_SCORE_THRESHOLD", "0.35"))
-FFMPEG_NVDEC_ENABLED = os.getenv("FFMPEG_NVDEC_ENABLED", "true").lower() == "true"
-FFMPEG_NVDEC_DEVICE = os.getenv("FFMPEG_NVDEC_DEVICE", "0")
+
+# CUDA 设备配置 (用于 FFmpeg NVDEC 解码 + CUDA MOG2)
+CUDA_DEVICE = os.getenv("CUDA_DEVICE", os.getenv("FFMPEG_NVDEC_DEVICE", "0"))
 
 # MOG2 运动检测配置
 USE_MOG2_FILTER = os.getenv("USE_MOG2_FILTER", "true").lower() == "true"
@@ -53,7 +54,40 @@ MOG2_LOWRES_HEIGHT = int(os.getenv("MOG2_LOWRES_HEIGHT", "360"))
 MOG2_LOWRES_FPS = float(os.getenv("MOG2_LOWRES_FPS", "12"))
 MOG2_DEBOUNCE_FRAMES = int(os.getenv("MOG2_DEBOUNCE_FRAMES", "3"))
 MOG2_ALWAYS_SAMPLE_INTERVAL = float(os.getenv("MOG2_ALWAYS_SAMPLE_INTERVAL", "5.0"))
-# 移除 MOG2_MAX_FRAMES 限制 - GPU 已扩展，无需采样限制
+
+# 图片压缩配置
+COMPRESS_MAX_SIZE = int(os.getenv("COMPRESS_MAX_SIZE", "640"))
+COMPRESS_QUALITY = int(os.getenv("COMPRESS_QUALITY", "85"))
+
+# CUDA MOG2 可用性检测 (启动时一次)
+_CUDA_MOG2_AVAILABLE = None
+
+
+def _check_cuda_mog2():
+    """检测 cv2.cuda MOG2 是否可用 (失败时允许重试)"""
+    global _CUDA_MOG2_AVAILABLE
+    if _CUDA_MOG2_AVAILABLE is True:
+        return True
+    try:
+        count = cv2.cuda.getCudaEnabledDeviceCount()
+        if count > 0:
+            cv2.cuda.setDevice(int(CUDA_DEVICE))
+            test_mog2 = cv2.cuda.createBackgroundSubtractorMOG2(
+                history=10, varThreshold=16, detectShadows=False
+            )
+            # 验证 apply() 调用 (OpenCV 4.10 CUDA 需要 stream 参数)
+            test_frame = cv2.cuda_GpuMat(np.zeros((64, 64), dtype=np.uint8))
+            test_stream = cv2.cuda.Stream()
+            test_mog2.apply(test_frame, -1, test_stream)
+            _CUDA_MOG2_AVAILABLE = True
+        else:
+            _CUDA_MOG2_AVAILABLE = False
+    except Exception as e:
+        import logging
+        logging.getLogger("semantic").warning(f"CUDA MOG2 检测失败 (将在下次任务重试): {e}")
+        _CUDA_MOG2_AVAILABLE = None  # 不缓存失败，允许重试
+        return False
+    return _CUDA_MOG2_AVAILABLE
 
 
 @dataclass
@@ -90,9 +124,9 @@ class AnalysisResult:
     confidence: float
     reason: str
     raw_response: str = ""
-    violation_type: str = None  # 违法类型
-    behavior_type: str = None  # 行为类型
-    marker_light_state: str = None  # 示廓灯状态 (ads_behavior)
+    violation_type: str = None
+    behavior_type: str = None
+    marker_light_state: str = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -125,7 +159,6 @@ class SemanticAnalyzerBase(ABC):
         self.task_count = 0
         self.running = True
 
-        # 模板嵌入（子类加载）
         self.template_embeddings: Optional[np.ndarray] = None
         self.templates: List[str] = []
 
@@ -152,8 +185,21 @@ class SemanticAnalyzerBase(ABC):
         pass
 
     def should_process_task(self, task: VideoTask) -> bool:
-        """判断是否处理该任务（基于 analysis_type）"""
-        return task.analysis_type == self.analysis_type
+        """每种分析器独立 consumer group，处理所有任务"""
+        return True
+
+    def compress_image(self, image_path: str, max_size: int = COMPRESS_MAX_SIZE, quality: int = COMPRESS_QUALITY) -> bytes:
+        """压缩图片 (Embedding + VLM 共用)"""
+        img = cv2.imread(image_path)
+        if img is None:
+            with open(image_path, "rb") as f:
+                return f.read()
+        h, w = img.shape[:2]
+        if max(w, h) > max_size:
+            scale = max_size / max(w, h)
+            img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+        _, buffer = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        return buffer.tobytes()
 
     def load_template_embeddings(self):
         """加载语义模板嵌入"""
@@ -177,6 +223,33 @@ class SemanticAnalyzerBase(ABC):
             self.log.error(f"加载模板嵌入失败: {e}")
             self.template_embeddings = None
 
+    def _get_video_info(self, video_path: str) -> Tuple[float, int, int, int]:
+        """获取视频信息 (fps, width, height, total_frames)"""
+        try:
+            cmd = [
+                "ffprobe", "-v", "quiet",
+                "-print_format", "json",
+                "-show_streams", "-show_format",
+                str(video_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=10)
+            info = json.loads(result.stdout)
+            for stream in info.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    fps_str = stream.get("r_frame_rate", "25/1")
+                    num, den = fps_str.split("/")
+                    fps = float(num) / float(den) if float(den) > 0 else 25.0
+                    width = int(stream.get("width", 1920))
+                    height = int(stream.get("height", 1080))
+                    nb_frames = int(stream.get("nb_frames", 0))
+                    if nb_frames == 0:
+                        duration = float(info.get("format", {}).get("duration", 60))
+                        nb_frames = int(duration * fps)
+                    return fps, width, height, nb_frames
+        except Exception:
+            pass
+        return 25.0, 1920, 1080, 0
+
     def extract_frames(
         self,
         video_path: str,
@@ -184,7 +257,7 @@ class SemanticAnalyzerBase(ABC):
         job_id: str = "",
         trace_id: str = ""
     ) -> List[FrameInfo]:
-        """从视频提取帧（复用原逻辑，支持 NVDEC）"""
+        """从视频提取帧 (FFmpeg NVDEC GPU 解码)"""
         frames = []
         video_path = Path(video_path)
 
@@ -195,31 +268,19 @@ class SemanticAnalyzerBase(ABC):
         tmpdir = Path(tempfile.mkdtemp())
         output_pattern = str(tmpdir / "frame_%04d.jpg")
 
-        if FFMPEG_NVDEC_ENABLED:
-            cmd = [
-                "ffmpeg",
-                "-hwaccel", "cuda",
-                "-hwaccel_device", FFMPEG_NVDEC_DEVICE,
-                "-i", str(video_path),
-                "-vf", f"fps={fps}",
-                "-q:v", "2",
-                output_pattern
-            ]
-        else:
-            cmd = [
-                "ffmpeg",
-                "-i", str(video_path),
-                "-vf", f"fps={fps}",
-                "-q:v", "2",
-                output_pattern
-            ]
+        cmd = [
+            "ffmpeg",
+            "-hwaccel", "cuda",
+            "-hwaccel_device", CUDA_DEVICE,
+            "-i", str(video_path),
+            "-vf", f"fps={fps}",
+            "-q:v", "2",
+            output_pattern
+        ]
 
         try:
             result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=120
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120
             )
             if result.returncode != 0:
                 self.log.error(f"ffmpeg 抽帧失败: {result.stderr.decode()[-500:]}", job_id=job_id)
@@ -237,9 +298,7 @@ class SemanticAnalyzerBase(ABC):
                 tmpdir=str(tmpdir)
             ))
 
-        decode_mode = f"GPU:{FFMPEG_NVDEC_DEVICE}" if FFMPEG_NVDEC_ENABLED else "CPU"
-        self.log.info(f"抽取 {len(frames)} 帧 @ {fps} fps ({decode_mode})", job_id=job_id, trace_id=trace_id)
-
+        self.log.info(f"抽取 {len(frames)} 帧 @ {fps} fps (GPU:{CUDA_DEVICE})", job_id=job_id, trace_id=trace_id)
         return frames
 
     def extract_frames_with_mog2(
@@ -248,14 +307,12 @@ class SemanticAnalyzerBase(ABC):
         job_id: str = "",
         trace_id: str = ""
     ) -> List[FrameInfo]:
-        """使用 MOG2 运动检测提取关键帧（取代 1fps 固定抽帧）
+        """FFmpeg NVDEC 解码 + CUDA/CPU MOG2 运动检测
 
-        流程：
-        1. 低分辨率 (640×360 @ 12fps) 读取视频
-        2. MOG2 检测运动触发点 (fg_ratio >= 0.015)
-        3. 仅在触发点提取高清帧
-
-        优势：过滤 90%+ 静止画面，只处理有运动的帧
+        流程:
+        1. FFmpeg NVDEC 低分辨率管道 (640x360@12fps) -> rawvideo pipe
+        2. CUDA MOG2 (或 CPU 回退) 运动检测 -> 记录触发时间点
+        3. FFmpeg NVDEC select 表达式 -> 仅提取触发帧 (原始分辨率 JPEG)
         """
         frames = []
         video_path = Path(video_path)
@@ -264,131 +321,144 @@ class SemanticAnalyzerBase(ABC):
             self.log.error(f"视频不存在: {video_path}", job_id=job_id)
             return frames
 
-        # 创建临时目录
         tmpdir = Path(tempfile.mkdtemp())
+        proc = None
 
         try:
-            cap = cv2.VideoCapture(str(video_path))
-            if not cap.isOpened():
-                self.log.error(f"无法打开视频: {video_path}", job_id=job_id)
-                return frames
+            orig_fps, orig_width, orig_height, total_frames = self._get_video_info(str(video_path))
 
-            # 获取视频属性
-            orig_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-            orig_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            orig_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-            # 计算低分辨率采样间隔
-            sample_interval = max(1, int(orig_fps / MOG2_LOWRES_FPS))
-
+            use_cuda_mog2 = _check_cuda_mog2()
+            decode_label = f"NVDEC:{CUDA_DEVICE}+{'CUDA' if use_cuda_mog2 else 'CPU'}MOG2"
             self.log.info(
                 f"MOG2 运动检测: {orig_width}x{orig_height}@{orig_fps:.1f}fps -> "
-                f"{MOG2_LOWRES_WIDTH}x{MOG2_LOWRES_HEIGHT}@{MOG2_LOWRES_FPS}fps, "
-                f"interval={sample_interval}",
+                f"{MOG2_LOWRES_WIDTH}x{MOG2_LOWRES_HEIGHT}@{MOG2_LOWRES_FPS}fps ({decode_label})",
                 job_id=job_id, trace_id=trace_id
             )
 
-            # 初始化 MOG2
-            bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-                history=400, varThreshold=16, detectShadows=True
-            )
+            # ===== 阶段1: FFmpeg NVDEC 低分辨率管道 + MOG2 =====
+            t0 = time.time()
 
-            motion_streak = 0
-            trigger_timestamps = []
-            last_force_ts = -1e9
+            cmd = [
+                "ffmpeg",
+                "-hwaccel", "cuda",
+                "-hwaccel_device", CUDA_DEVICE,
+                "-i", str(video_path),
+                "-vf", f"scale={MOG2_LOWRES_WIDTH}:{MOG2_LOWRES_HEIGHT},fps={MOG2_LOWRES_FPS}",
+                "-f", "rawvideo", "-pix_fmt", "bgr24",
+                "-v", "quiet", "-"
+            ]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+            frame_size = MOG2_LOWRES_WIDTH * MOG2_LOWRES_HEIGHT * 3
+
+            if use_cuda_mog2:
+                cv2.cuda.setDevice(int(CUDA_DEVICE))
+                bg_subtractor = cv2.cuda.createBackgroundSubtractorMOG2(
+                    history=400, varThreshold=16, detectShadows=True
+                )
+                cuda_stream = cv2.cuda.Stream()
+                gpu_frame = cv2.cuda_GpuMat()
+            else:
+                bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+                    history=400, varThreshold=16, detectShadows=True
+                )
+
+            trigger_frame_indices = []
             frame_idx = 0
+            motion_streak = 0
+            last_force_ts = -1e9
 
             while True:
-                ret, frame = cap.read()
-                if not ret:
+                raw = proc.stdout.read(frame_size)
+                if len(raw) != frame_size:
                     break
 
-                # 跳帧采样
-                if frame_idx % sample_interval != 0:
-                    frame_idx += 1
-                    continue
+                frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                    MOG2_LOWRES_HEIGHT, MOG2_LOWRES_WIDTH, 3
+                )
+                timestamp = frame_idx / MOG2_LOWRES_FPS
 
-                timestamp = frame_idx / orig_fps
+                if use_cuda_mog2:
+                    gpu_frame.upload(frame)
+                    gpu_gray = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2GRAY)
+                    gpu_fg = bg_subtractor.apply(gpu_gray, -1, cuda_stream)
+                    fg_mask = gpu_fg.download()
+                else:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+                    fg_mask = bg_subtractor.apply(gray)
+                    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
-                # 缩小到低分辨率
-                lowres = cv2.resize(frame, (MOG2_LOWRES_WIDTH, MOG2_LOWRES_HEIGHT))
-                gray = cv2.cvtColor(lowres, cv2.COLOR_BGR2GRAY)
-                gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
-                # MOG2 运动检测
-                fg_mask = bg_subtractor.apply(gray)
-                fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
                 fg_ratio = np.count_nonzero(fg_mask) / fg_mask.size
 
-                # 检测运动触发
                 if fg_ratio >= MOG2_FG_RATIO_THRESHOLD:
                     motion_streak += 1
                 else:
                     motion_streak = 0
 
                 triggered = False
-
-                # 连续帧触发（防抖）
                 if motion_streak >= MOG2_DEBOUNCE_FRAMES:
                     triggered = True
                     motion_streak = 0
-
-                # 强制采样兜底
                 if timestamp - last_force_ts >= MOG2_ALWAYS_SAMPLE_INTERVAL:
                     triggered = True
                     last_force_ts = timestamp
 
                 if triggered:
-                    trigger_timestamps.append((frame_idx, timestamp, fg_ratio))
+                    orig_frame_idx = int(timestamp * orig_fps)
+                    trigger_frame_indices.append((orig_frame_idx, timestamp))
 
                 frame_idx += 1
 
-            cap.release()
+            proc.wait()
+            t1 = time.time()
 
             self.log.info(
-                f"MOG2 触发 {len(trigger_timestamps)} 个时间点 (共 {total_frames} 帧)",
+                f"阶段1 MOG2: {frame_idx} 帧 -> {len(trigger_frame_indices)} 触发点, "
+                f"耗时={t1-t0:.1f}s",
                 job_id=job_id, trace_id=trace_id
             )
 
-            if not trigger_timestamps:
+            if not trigger_frame_indices:
                 self.log.warning("MOG2 无触发点，跳过", job_id=job_id)
                 return frames
 
-            # GPU 已扩展，不再限制帧数
+            # ===== 阶段2: FFmpeg NVDEC 仅提取触发帧 =====
+            t2 = time.time()
 
-            # 第二遍：仅在触发点提取高清帧
-            cap = cv2.VideoCapture(str(video_path))
-            trigger_set = {t[0] for t in trigger_timestamps}
+            select_parts = [f"eq(n\\,{idx})" for idx, _ in trigger_frame_indices]
+            select_expr = "+".join(select_parts)
 
-            frame_idx = 0
-            saved_count = 0
+            output_pattern = str(tmpdir / "frame_%04d.jpg")
+            cmd = [
+                "ffmpeg",
+                "-hwaccel", "cuda",
+                "-hwaccel_device", CUDA_DEVICE,
+                "-i", str(video_path),
+                "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
+                "-vsync", "0",
+                "-q:v", "2",
+                output_pattern
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=120)
 
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            t3 = time.time()
 
-                if frame_idx in trigger_set:
-                    # 保存高清帧
-                    frame_path = str(tmpdir / f"frame_{saved_count:04d}.jpg")
-                    cv2.imwrite(frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-
-                    timestamp = frame_idx / orig_fps
+            for i, (orig_idx, timestamp) in enumerate(trigger_frame_indices):
+                frame_path = str(tmpdir / f"frame_{i+1:04d}.jpg")
+                if Path(frame_path).exists():
                     frames.append(FrameInfo(
-                        frame_idx=saved_count,
+                        frame_idx=i,
                         timestamp_sec=timestamp,
                         frame_path=frame_path,
                         tmpdir=str(tmpdir)
                     ))
-                    saved_count += 1
 
-                frame_idx += 1
-
-            cap.release()
-
+            total_time = t3 - t0
+            filter_pct = 100 * (1 - len(frames) / max(1, frame_idx))
             self.log.info(
-                f"MOG2 提取 {len(frames)} 帧 (过滤 {100 * (1 - len(frames) / max(1, total_frames / sample_interval)):.1f}% 静止帧)",
+                f"MOG2 提取 {len(frames)} 帧 (过滤 {filter_pct:.1f}% 静止帧), "
+                f"阶段1={t1-t0:.1f}s 阶段2={t3-t2:.1f}s 总计={total_time:.1f}s",
                 job_id=job_id, trace_id=trace_id
             )
 
@@ -396,6 +466,13 @@ class SemanticAnalyzerBase(ABC):
             self.log.error(f"MOG2 抽帧异常: {e}", job_id=job_id, trace_id=trace_id)
             import traceback
             self.log.error(traceback.format_exc())
+            # 清理可能残留的 ffmpeg 子进程
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
 
         return frames
 
@@ -405,7 +482,7 @@ class SemanticAnalyzerBase(ABC):
         job_id: str = "",
         trace_id: str = ""
     ) -> List[FrameInfo]:
-        """计算帧嵌入"""
+        """计算帧嵌入 (压缩后发送)"""
         if not frames:
             return frames
 
@@ -414,8 +491,7 @@ class SemanticAnalyzerBase(ABC):
 
         for i, frame in enumerate(frames):
             try:
-                with open(frame.frame_path, "rb") as f:
-                    img_bytes = f.read()
+                img_bytes = self.compress_image(frame.frame_path)
                 images_b64.append(base64.b64encode(img_bytes).decode())
                 valid_indices.append(i)
             except Exception as e:
@@ -545,29 +621,20 @@ class SemanticAnalyzerBase(ABC):
         job_id: str = "",
         trace_id: str = ""
     ) -> AnalysisResult:
-        """调用 VLM 进行分析"""
+        """调用 VLM 进行分析 (压缩后发送)"""
         if not keyframes:
-            return AnalysisResult(
-                judgment="NO",
-                confidence=0.0,
-                reason="无关键帧"
-            )
+            return AnalysisResult(judgment="NO", confidence=0.0, reason="无关键帧")
 
         images_b64 = []
         for frame in keyframes:
             try:
-                with open(frame.frame_path, "rb") as f:
-                    img_bytes = f.read()
+                img_bytes = self.compress_image(frame.frame_path)
                 images_b64.append(base64.b64encode(img_bytes).decode())
             except Exception as e:
                 self.log.warning(f"读取关键帧失败: {frame.frame_path}, {e}")
 
         if not images_b64:
-            return AnalysisResult(
-                judgment="NO",
-                confidence=0.0,
-                reason="无法读取关键帧"
-            )
+            return AnalysisResult(judgment="NO", confidence=0.0, reason="无法读取关键帧")
 
         prompt = self.get_vlm_prompt()
 
@@ -597,25 +664,18 @@ class SemanticAnalyzerBase(ABC):
             data = resp.json()
 
             response_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
             result = self.parse_vlm_response(response_text)
             result.raw_response = response_text
 
             self.log.info(
                 f"VLM 判断: {result.judgment} (conf={result.confidence})",
-                job_id=job_id,
-                trace_id=trace_id
+                job_id=job_id, trace_id=trace_id
             )
-
             return result
 
         except Exception as e:
             self.log.error(f"VLM 调用失败: {e}", job_id=job_id, trace_id=trace_id)
-            return AnalysisResult(
-                judgment="ERROR",
-                confidence=0.0,
-                reason=str(e)
-            )
+            return AnalysisResult(judgment="ERROR", confidence=0.0, reason=str(e))
 
     def save_result(
         self,
@@ -682,21 +742,20 @@ class SemanticAnalyzerBase(ABC):
             raise
 
     def process_task(self, task: VideoTask) -> bool:
-        """处理单个任务（子类可覆盖）"""
+        """处理单个任务"""
         start_time = time.time()
         job_id = task.job_id
         trace_id = task.trace_id
 
         self.log.info(
             f"开始处理任务 [{self.analysis_type}]: {task.window_path}",
-            job_id=job_id,
-            trace_id=trace_id
+            job_id=job_id, trace_id=trace_id
         )
 
         try:
             self.redis.set_task_status(job_id, "processing", self.consumer_name)
 
-            # 1. 抽帧（MOG2 运动检测 或 1fps 固定抽帧）
+            # 1. 抽帧
             if USE_MOG2_FILTER:
                 frames = self.extract_frames_with_mog2(task.window_path, job_id=job_id, trace_id=trace_id)
             else:
@@ -717,11 +776,7 @@ class SemanticAnalyzerBase(ABC):
             clips = self.cluster_frames_to_clips(frames, job_id=job_id, trace_id=trace_id)
 
             # 5. VLM 分析
-            analysis_result = AnalysisResult(
-                judgment="NO",
-                confidence=1.0,
-                reason="无可疑片段"
-            )
+            analysis_result = AnalysisResult(judgment="NO", confidence=1.0, reason="无可疑片段")
 
             if clips:
                 best_clip = max(clips, key=lambda c: c.clip_score)
@@ -740,8 +795,7 @@ class SemanticAnalyzerBase(ABC):
                         job_id=job_id, trace_id=trace_id
                     )
                     analysis_result = AnalysisResult(
-                        judgment="NO",
-                        confidence=1.0,
+                        judgment="NO", confidence=1.0,
                         reason=f"最高分 {best_clip.clip_score:.3f} 低于阈值"
                     )
 
@@ -774,10 +828,8 @@ class SemanticAnalyzerBase(ABC):
 
             self.log.info(
                 f"任务完成: {job_id}, 耗时={processing_time:.1f}s, 判断={analysis_result.judgment}",
-                job_id=job_id,
-                trace_id=trace_id
+                job_id=job_id, trace_id=trace_id
             )
-
             return True
 
         except Exception as e:
@@ -801,6 +853,11 @@ class SemanticAnalyzerBase(ABC):
         """主循环"""
         self.log.info(f"启动 Semantic Analyzer [{self.analysis_type}]: {self.consumer_name}")
 
+        if _check_cuda_mog2():
+            self.log.info("CUDA MOG2 可用")
+        else:
+            self.log.warning("CUDA MOG2 不可用，回退到 CPU MOG2")
+
         self.load_template_embeddings()
 
         while self.running:
@@ -820,13 +877,7 @@ class SemanticAnalyzerBase(ABC):
                     if not self.running:
                         break
 
-                    # 只处理匹配 analysis_type 的任务
                     if not self.should_process_task(task):
-                        self.log.info(
-                            f"跳过任务: analysis_type={task.analysis_type} != {self.analysis_type}",
-                            job_id=task.job_id
-                        )
-                        # ACK 不匹配的消息（每个 consumer group 独立，无法让其他分析器处理）
                         self.redis.ack_video_task(self.consumer_group, msg_id)
                         continue
 

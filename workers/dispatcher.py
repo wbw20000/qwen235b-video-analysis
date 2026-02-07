@@ -204,12 +204,18 @@ class Dispatcher:
         prev_segment: Optional[Path],
         curr_segment: Path,
         seg_end_ts: int
-    ) -> Optional[Path]:
+    ) -> Tuple[Optional[Path], bool]:
         """
         创建重叠窗口
         window[i] = tail(seg[i-1], 30s) + seg[i]
 
         如果没有前一个分片，则直接使用当前分片
+
+        Returns:
+            (path, is_new): 路径和是否新创建的标志
+            - (path, True): 新创建的窗口，需要提交任务
+            - (path, False): 已存在的窗口，不需要重复提交
+            - (None, False): 创建失败
         """
         # 确定性 job_id
         job_id = f"{self.camera_id}_{seg_end_ts}"
@@ -217,10 +223,10 @@ class Dispatcher:
         tmp_path = self.output_dir / f"{window_filename}.tmp"
         final_path = self.output_dir / window_filename
 
-        # 检查是否已存在（幂等性）
+        # 检查是否已存在（幂等性）- 已存在则不需要重复提交任务
         if final_path.exists():
-            self.log.info(f"窗口已存在，跳过: {final_path.name}", job_id=job_id)
-            return final_path
+            self.log.debug(f"窗口已存在，跳过创建: {final_path.name}", job_id=job_id)
+            return final_path, False  # 已存在，不需要提交
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -239,7 +245,7 @@ class Dispatcher:
             curr_ts = tmpdir / "curr.ts"
             if not self._convert_to_ts(curr_segment, curr_ts):
                 self.log.error(f"转换 TS 失败: {curr_segment.name}")
-                return None
+                return None, False
             ts_files.append(curr_ts)
 
             # 3. 合并为 MP4
@@ -251,7 +257,7 @@ class Dispatcher:
                 # 合并
                 if not self._concat_ts_to_mp4(ts_files, tmp_path):
                     self.log.error(f"合并失败: {window_filename}")
-                    return None
+                    return None, False
 
         # 4. 原子重命名
         try:
@@ -259,12 +265,12 @@ class Dispatcher:
                 os.fsync(f.fileno())
             os.rename(tmp_path, final_path)
             self.log.info(f"窗口创建成功: {final_path.name}", job_id=job_id)
-            return final_path
+            return final_path, True  # 新创建，需要提交任务
         except Exception as e:
             self.log.error(f"重命名失败: {e}")
             if tmp_path.exists():
                 tmp_path.unlink()
-            return None
+            return None, False
 
     def _submit_task(self, window_path: Path, seg_end_ts: int) -> bool:
         """提交任务到 Redis Stream"""
@@ -314,16 +320,21 @@ class Dispatcher:
                     _, prev_segment = segments[i - 1]
 
                 # 创建窗口
-                window_path = self._create_window(prev_segment, seg_path, ts)
+                window_path, is_new = self._create_window(prev_segment, seg_path, ts)
                 if window_path:
-                    # 提交任务
-                    if self._submit_task(window_path, ts):
+                    if is_new:
+                        # 只有新创建的窗口才提交任务，避免重复提交
+                        if self._submit_task(window_path, ts):
+                            self.processed_segments.add(ts)
+                            self.task_count += 1
+                            self.log.info(
+                                f"已处理 {self.task_count}/{MAX_TASKS_BEFORE_EXIT} 个分片",
+                                job_id=f"{self.camera_id}_{ts}"
+                            )
+                    else:
+                        # 窗口已存在，直接标记为已处理，不重复提交
                         self.processed_segments.add(ts)
-                        self.task_count += 1
-                        self.log.info(
-                            f"已处理 {self.task_count}/{MAX_TASKS_BEFORE_EXIT} 个分片",
-                            job_id=f"{self.camera_id}_{ts}"
-                        )
+                        self.log.debug(f"窗口已存在，跳过提交: {ts}")
 
             # 等待下一轮
             time.sleep(POLL_INTERVAL_SEC)

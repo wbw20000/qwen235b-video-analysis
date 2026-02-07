@@ -1,28 +1,28 @@
-# 机动车违法检测分析器 Deployment (CUDA MOG2 + FFmpeg NVDEC)
+# Semantic Analyzer Deployment - GPU 1 (CUDA MOG2 + FFmpeg NVDEC)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mv-violation-analyzer
+  name: semantic-analyzer-g1
   namespace: traffic-vlm
   labels:
-    app: mv-violation-analyzer
-    analysis-type: mv_violation
+    app: semantic-analyzer
+    cuda-device: "1"
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
-      app: mv-violation-analyzer
+      app: semantic-analyzer
+      cuda-device: "1"
   template:
     metadata:
       labels:
-        app: mv-violation-analyzer
-        analysis-type: mv_violation
+        app: semantic-analyzer
+        cuda-device: "1"
     spec:
       containers:
       - name: analyzer
         image: localhost:5000/semantic-analyzer:v11
         imagePullPolicy: Always
-        command: ["python", "-m", "workers.mv_violation_analyzer"]
         env:
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"

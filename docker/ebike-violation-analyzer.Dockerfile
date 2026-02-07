@@ -1,5 +1,5 @@
-# 电动自行车违法检测分析器镜像
-FROM traffic-vlm-base:latest
+# 电动自行车违法检测分析器镜像 (CUDA MOG2 + FFmpeg NVDEC)
+FROM opencv-cuda-base:latest
 
 LABEL service="ebike-violation-analyzer"
 LABEL description="E-bike Violation Analyzer"
@@ -24,8 +24,6 @@ ENV VLM_PROXY_URL=http://vlm-proxy:8001
 ENV RESULTS_DIR=/data1/results
 ENV MAX_TASKS=50
 ENV CLIP_SCORE_THRESHOLD=0.35
-ENV FFMPEG_NVDEC_ENABLED=true
-ENV FFMPEG_NVDEC_DEVICE=5
 
 # 启动命令
 CMD ["python", "-m", "workers.ebike_violation_analyzer"]
