@@ -34,25 +34,48 @@ def _safe_print(*args, **kwargs):
 
 def _extract_json_from_markdown(text: str) -> str:
     """
-    从markdown代码块中提取JSON内容
+    从markdown代码块或自由文本中提取JSON内容
 
-    VLM有时会返回被markdown代码块包裹的JSON：
-    ```json
-    {"key": "value"}
-    ```
-
-    此函数去除包裹，返回纯JSON字符串
+    支持以下格式：
+    1. ```json { ... } ``` — markdown代码块
+    2. <think>...</think> { ... } — thinking模型带标签
+    3. 思考文本... { ... } — thinking模型无标签（如Qwen3.5）
     """
     if not text:
         return text
 
     text = text.strip()
 
-    # 匹配 ```json ... ``` 或 ``` ... ```
+    # 剥离 thinking 模型的 <think>...</think> 标签
+    think_pattern = r'<think>.*?</think>'
+    text = re.sub(think_pattern, '', text, flags=re.DOTALL).strip()
+
+    # 方法1: 匹配 ```json ... ``` 或 ``` ... ```
     pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
     match = re.search(pattern, text, re.DOTALL)
     if match:
         return match.group(1).strip()
+
+    # 方法2: 文本本身就是纯JSON（以 { 开头）
+    if text.startswith('{'):
+        return text
+
+    # 方法3: 从自由文本中提取最后一个完整JSON块
+    # （适用于thinking模型输出: 思考文本 + JSON）
+    last_brace = text.rfind('}')
+    if last_brace >= 0:
+        depth = 0
+        for i in range(last_brace, -1, -1):
+            if text[i] == '}':
+                depth += 1
+            elif text[i] == '{':
+                depth -= 1
+            if depth == 0:
+                candidate = text[i:last_brace + 1]
+                # 快速验证：至少包含一个JSON键值对
+                if '"' in candidate:
+                    return candidate
+                break
 
     return text
 
@@ -519,6 +542,11 @@ def _build_api_params(config, messages):
         api_params['top_p'] = config.top_p
     if hasattr(config, 'max_tokens'):
         api_params['max_tokens'] = config.max_tokens
+    # Qwen3.5 thinking 模型：关闭思维链，直接输出 JSON
+    if '3.5' in config.model or 'qwen3.5' in config.model.lower():
+        api_params['extra_body'] = {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
     return api_params
 
 

@@ -169,6 +169,65 @@ echo "vLLM started"  # 脚本返回
 
 ---
 
+## General Rules
+
+### Task Resumption
+
+恢复或继续长时间运行的任务（评测、构建、实验）时，**必须先检查是否有缓存结果、检查点或部分进度**，避免从头重跑。不确定时询问用户。
+
+- 评测任务：检查 `data/video_results/` 下的 `.result.json.gz` 缓存
+- Docker 构建：检查镜像是否已存在（`docker images | grep tag`）
+- 实验运行：检查 `outputs/` 目录下是否有之前的 `summary.json`
+
+### Estimation & Analysis
+
+估算计算资源或成本时：
+
+1. **先确认架构模式**：批处理/事件驱动 vs 实时逐路推理，不同模式的资源需求差异巨大
+2. **基于实际测试数据**：使用真实的评测报告数据（如 `summary.json` 中的处理时间）作为估算基础
+3. **不要假设实时逐设备推理**：除非明确说明，本项目是事件驱动架构（Redis 队列触发分析），不是每路摄像头持续推理
+
+---
+
+## Infrastructure Context
+
+本项目使用 vLLM + Kubernetes 架构进行视频/交通分析，GPU pods 分布在 8 张 T4 上。
+
+### 关键架构细节
+
+- **Redis 队列区分**：`video_tasks`（预处理任务）和 `accident_tasks`（分析任务）是不同队列，注意区分
+- **vLLM 服务管理**：可能同时存在 systemd service 和 legacy 启动脚本（`start_vllm.sh`），操作前**两者都要检查**
+- **模型权重分离**：Docker 镜像**不应包含模型权重**，通过 volume mount 挂载（`/data/models/`）
+- **使用本地 vLLM 端点**：K8S 内部通过 `llm-server:8000` 访问，**不使用 DashScope API**
+- **HPA 注意事项**：GPU 工作负载的 HPA 应考虑 GPU 显存，而非仅 CPU 利用率
+
+---
+
+## Remote Server Operations
+
+通过 SSH 操作远程服务器时：
+
+- **连接超时**：设置至少 30s（`ssh -o ConnectTimeout=30`）
+- **Tailscale VPN**：预期网络间歇性中断，长时间运行的远程命令需要内置重试逻辑
+- **使用 tmux/screen**：长时间运行的任务（构建、部署）应在 tmux 会话中执行，防止 SSH 断连导致任务中断
+- **Docker 上下文**：操作前验证 Docker context 和 containerd 镜像兼容性（`docker context ls`）
+- **文件传输**：大文件传输优先使用 `rsync --partial --progress`，支持断点续传
+
+---
+
+## Docker Builds
+
+Docker 镜像构建规范：
+
+- **使用 BuildKit 缓存**：`DOCKER_BUILDKIT=1 docker build ...`，利用 `--mount=type=cache` 加速 pip 安装
+- **Python 依赖管理**：安装 `uv` 替代 pip，显著加速依赖安装（`pip install uv && uv pip install -r requirements.txt`）
+- **模型权重分离**：镜像内**不打包模型文件**，通过 K8S hostPath 或 PV 挂载 `/data/models/`
+- **构建前检查磁盘空间**：`df -h` 确认目标驱动器有足够空间（镜像构建常需 5-10 GB 临时空间）
+- **Docker 数据根目录**：不要假设在 C: 盘（Windows）或 `/var/lib/docker`（Linux），检查 `docker info | grep "Docker Root Dir"`
+- **构建时使用 `--no-cache`**：当代码层可能被缓存旧内容时（特别是 `COPY workers/` 层）
+
+---
+
 ## 关键参数设定
 
 | 参数 | 值 | 理由 |
@@ -246,63 +305,233 @@ echo "vLLM started"  # 脚本返回
 
 ---
 
-## 待办：消融实验（验证物理检测贡献）
+## 已完成：No-SigLIP 模型对比实验（2026-02-12）
 
-### 背景问题
+### 实验概要
 
-当前 `clip_score` 计算中存在**信号冗余**：
-- `similarity_score`：SigLIP 语义相似度（包含事故模板匹配）
-- `accident_template_hit`：命中事故模板时直接给 1.0
+5 个 VLM 模型 x 261 视频（197事故 + 64非事故），跳过 SigLIP（hardcode similarity=1.0, template_hit=True），其他预处理组件全开。
 
-```python
-# temporal_clusterer.py
-def _frame_accident_score(frame):
-    if meta.get("accident_template_hit"):
-        scores.append(1.0)  # 直接给1.0，淹没物理信号
-    return max(scores)
+### STRICT 模式结果
+
+| 模型 | TP | FP | TN | FN | UNC | Recall | FPR | Precision | F1 | abstain% |
+|------|----|----|----|----|-----|--------|-----|-----------|------|----------|
+| A: 8B Instruct | 182 | 0 | 9 | 4 | 66 | 97.8% | 0.0% | 100.0% | 98.9% | 25.3% |
+| B: 8B Thinking | 128 | 19 | 33 | 46 | 35 | 73.6% | 36.5% | 87.1% | 79.8% | 13.4% |
+| **C: 32B Instruct** | **177** | **3** | **60** | **18** | **3** | **90.8%** | **4.8%** | **98.3%** | **94.4%** | **1.1%** |
+| D: 32B Thinking | 160 | 2 | 56 | 29 | 14 | 84.7% | 3.4% | 98.8% | 91.2% | 5.4% |
+| E: 32B-AWQ | 168 | 1 | 62 | 29 | 1 | 85.3% | 1.6% | 99.4% | 91.8% | 0.4% |
+
+### 关键结论
+
+1. **32B Instruct 综合最优**（F1=94.4%，两种模式稳定）
+2. **AWQ 4bit 量化精度损失可控**（F1 降 2.6%，FPR 反而更低）
+3. **Thinking 模型不适合分类任务**（犹豫多，不稳定）
+4. **8B 系列模型能力不足**（大量弃权或幻觉）
+
+### 输出目录
+
+- 报告: `outputs/ablation_no_siglip_model_comparison.md`
+- 各模型结果: `outputs/ablation_no_siglip_{model}/eval/summary.json`
+
+---
+
+## 进行中：预处理组件消融实验 v2（2026-02-13 开始）
+
+### 核心问题
+
+MOG2、YOLO+ByteTrack、智能选帧、元数据文本等预处理组件对最终 VLM 准确率的实际贡献是多少？哪些可以裁剪以降低算力成本？
+
+### 管线数据流（代码追踪确认）
+
+```
+Video → MOG2运动检测 → 关键帧提取 → SigLIP语义检索 → 轨迹评分(默认OFF)
+  → 时间聚类 → Clip剪辑 → YOLO+ByteTrack → KeyframeSelector智能选帧
+  → MetadataPack元数据文本 → VLM S1/S2
 ```
 
-**问题**：只要命中事故模板，物理检测信号（collision/intersection/deceleration）就被淹没，可能没有实际贡献。
+**VLM 实际接收的输入**（Progressive模式）：
+1. **原始帧**（无YOLO框）— 由 KeyframeSelector 信号驱动选出
+2. **结构化文本 metadata_text** — 每帧检测目标(ID/类别/bbox)、最近距离、轨迹摘要
+3. **tracks_text** — ID→类别映射表
+4. **traffic_light_text** — 信号灯状态
 
-### 消融实验设计
+### 实验条件设计（6 条件）
 
-| 实验 | 修改 | 验证目标 |
-|------|------|---------|
-| **A1: 禁用轨迹评分** | `trajectory_score.enabled = False` | 物理检测是否有用 |
-| **A2: 禁用 template_hit** | 注释 `accident_template_hit` 逻辑 | 信号冗余是否影响效果 |
-| **A3: 仅物理信号** | 移除 `accident_template_hit`，只用轨迹分数 | 物理检测能否独立工作 |
+| 代号 | 名称 | MOG2 | SigLIP | YOLO(clip内) | 帧选择 | 元数据文本 | 回答的问题 |
+|------|------|------|--------|-------------|--------|-----------|-----------|
+| **C0** | Full Pipeline (基线) | ON | ON | ON | Smart | ON | 真正的基线 |
+| **C1** | No-SigLIP | ON | **OFF** | ON | Smart | ON | SigLIP 语义过滤贡献 |
+| **C2** | No-Metadata | ON | ON | ON | Smart | **OFF** | 元数据文本帮助还是干扰VLM |
+| **C3** | No-YOLO | ON | ON | **OFF** | **Uniform** | OFF | YOLO+ByteTrack 整体贡献 |
+| **C4** | No-SmartSelect | ON | ON | ON | **Uniform** | ON | 智能选帧 vs 均匀选帧 |
+| **C6** | Minimal | **OFF** | **OFF** | **OFF** | **Uniform** | OFF | 全部预处理的总价值 |
 
-### 实验命令
+### 条件间对比矩阵
+
+| 对比 | 隔离变量 | 洞察 |
+|------|---------|------|
+| C0 vs C1 | SigLIP | 语义过滤是否提升准确率 |
+| C0 vs C2 | Metadata text | 文本元数据对VLM判断的贡献（**最重要**） |
+| C0 vs C3 | YOLO整体 | 目标检测+跟踪+选帧+元数据的整体贡献 |
+| C0 vs C4 | Smart select | 信号驱动选帧 vs 简单均匀选帧 |
+| C2 vs C3 | YOLO选帧(无metadata) | 分离"选帧贡献" vs "metadata贡献" |
+| C0 vs C6 | 全部预处理 | 预处理管线的总体价值上限 |
+
+### 数据集（644 视频，比上轮 261 扩大 147%）
+
+| 类别 | 来源 | 数量 | 子计 |
+|------|------|------|------|
+| 事故（正样本） | 根目录 mp4 | 192 | |
+| | 01-自动驾驶车路侧/ | 6 | |
+| | 车网路测事故/ | 16 | **214** |
+| 非事故（负样本） | 1xxx 原有 | 28 | |
+| | 2xxx 新增路测 | 36 | |
+| | fp_ 实际车网路测 | 337 | |
+| | 非机动车违法事件（从正样本移入） | 29 | **430** |
+
+**正负比 1:2.0**（上轮 3:1），负样本翻倍，FPR 测试力度大幅提升。
+
+**数据集路径**：
+- 事故目录: `D:/project2025/qwen235b/uploads/大样本事故数据集`（递归扫描，排除"非机动车违法事件视频"子目录）
+- 非事故目录: `D:/project2025/qwen235b/uploads/大样本非交通事故数据集`
+- 额外非事故: `D:/project2025/qwen235b/uploads/大样本事故数据集/非机动车违法事件视频`
+
+### 模型策略 — 两阶段
+
+**第一阶段**（2 模型 x 6 条件 = 12 runs）：
+| 模型 | API 端点 | 理由 |
+|------|---------|------|
+| **32B Instruct** | DashScope 云端 | 上轮最佳(F1=94.4%) |
+| **32B-AWQ** | 远程 vLLM (100.123.59.56:8000) | 当前生产模型(F1=91.8%) |
+
+**第二阶段**：根据第一阶段结果，选差异最大的 3 个条件，用 8B-Instruct / 32B-Thinking / 8B-Thinking 验证。
+
+### 缓存复用策略
+
+| 预处理组 | 包含条件 | 说明 |
+|---------|---------|------|
+| **组A** | C0, C2, C4 | 完整预处理，C2/C4 只改 VLM 调用方式 |
+| **组B** | C1 | No-SigLIP 预处理（候选帧不同） |
+| **组C** | C3 | No-YOLO 预处理（均匀选帧） |
+| **组D** | C6 | Minimal（跳过 MOG2+SigLIP+YOLO） |
+
+### 串行批量执行策略
+
+**不使用并发**（Windows 内存限制），全部 12 runs 串行执行。
+
+**批量脚本**: `tools/run_ablation_v2_batch.py`
 
 ```bash
-# 基线
-d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
-  --output-dir outputs/ablation_baseline
+# 启动全量执行（无需 Claude 会话在线）
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_ablation_v2_batch.py
 
-# A1: 禁用轨迹评分
-# 修改 config.py: trajectory_score.enabled = False
-d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
-  --output-dir outputs/ablation_no_trajectory
+# 仅查看进度汇总
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_ablation_v2_batch.py --summary-only
 
-# A2: 禁用 template_hit
-# 修改 temporal_clusterer.py: 注释 accident_template_hit 相关代码
-d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
-  --output-dir outputs/ablation_no_template_hit
+# Dry-run 模式（打印命令不执行）
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_ablation_v2_batch.py --dry-run
+
+# 从指定 run 开始
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_ablation_v2_batch.py --start-from 3
 ```
 
-### 预期结论
+**执行顺序**（含缓存依赖）：
 
-| 实验结果 | 说明 | 后续动作 |
-|---------|------|---------|
-| A1效果不变 | 物理检测无用 | 可移除省算力（YOLO少跑一次） |
-| A1效果下降 | 物理检测对边界案例有帮助 | 保留但优化权重 |
-| A2效果更好 | 当前设计有冗余 | 重构 clip_score 计算逻辑 |
+```
+Run  1: C0 instruct  ← 生成组A缓存
+Run  2: C0 awq       ← 复用 Run1 缓存
+Run  3: C2 instruct  ← 复用 Run1 缓存 + skip-metadata
+Run  4: C2 awq       ← 复用 Run1 缓存 + skip-metadata
+Run  5: C4 instruct  ← 复用 Run1 缓存 + force-uniform
+Run  6: C4 awq       ← 复用 Run1 缓存 + force-uniform
+Run  7: C1 instruct  ← 独立预处理 (no-siglip)
+Run  8: C1 awq       ← 复用 Run7 缓存
+Run  9: C3 instruct  ← 独立预处理 (no-yolo)
+Run 10: C3 awq       ← 复用 Run9 缓存
+Run 11: C6 instruct  ← 独立预处理 (minimal)
+Run 12: C6 awq       ← 复用 Run11 缓存
+```
 
-### 相关文件
+**双层缓存保障**：
+1. **Run 级跳过**：检查 `eval/summary.json` 是否已存在 → 整个 run 跳过
+2. **视频级缓存**：evaluator 内部 `_try_load_cached_result()` 跳过已有 `.result.json.gz` 的视频
+3. **预处理缓存复用**：`--reuse-preprocess` 参数跳过同组重复预处理
 
-- `traffic_vlm/temporal_clusterer.py`: `_frame_accident_score()` 函数
-- `traffic_vlm/trajectory_scorer.py`: 轨迹评分计算
-- `traffic_vlm/config.py`: `TrajectoryScoreConfig.enabled`
+**中断恢复**：脚本中断后重启，自动跳过已完成 runs + 从视频级缓存断点继续。
+
+### 输出目录规划
+
+每条件每模型独立目录，互不覆盖：
+```
+outputs/ablation_v2_C0_32b_instruct/     # C0 基线, DashScope
+outputs/ablation_v2_C0_32b_awq/          # C0 基线, vLLM
+outputs/ablation_v2_C1_no_siglip_32b_instruct/
+outputs/ablation_v2_C1_no_siglip_32b_awq/
+outputs/ablation_v2_C2_no_metadata_32b_instruct/
+outputs/ablation_v2_C2_no_metadata_32b_awq/
+outputs/ablation_v2_C3_no_yolo_32b_instruct/
+outputs/ablation_v2_C3_no_yolo_32b_awq/
+outputs/ablation_v2_C4_uniform_32b_instruct/
+outputs/ablation_v2_C4_uniform_32b_awq/
+outputs/ablation_v2_C6_minimal_32b_instruct/
+outputs/ablation_v2_C6_minimal_32b_awq/
+```
+
+### 代码变更清单
+
+| 文件 | 变更 |
+|------|------|
+| `traffic_vlm/config.py` | 新增 `ablation_skip_mog2`, `ablation_force_uniform_frames` |
+| `tools/run_eval_to_output.py` | 新增 CLI 参数 + 数据集排除/额外目录参数 |
+| `evaluation/evaluator.py` | 配置透传 + `_scan_mp4()` 递归 + 排除逻辑 |
+| `traffic_vlm/pipeline.py` | skip_mog2 / force_uniform / disable_yolo 代码路径 |
+
+### 评测命令示例
+
+```bash
+# C0 基线 (32B Instruct)
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
+  --output-dir outputs/ablation_v2_C0_32b_instruct \
+  --model qwen3-vl-32b-instruct \
+  --acc-dir "D:/project2025/qwen235b/uploads/大样本事故数据集" \
+  --nonacc-dir "D:/project2025/qwen235b/uploads/大样本非交通事故数据集" \
+  --acc-exclude-subdir "非机动车违法事件视频" \
+  --extra-nonacc-dir "D:/project2025/qwen235b/uploads/大样本事故数据集/非机动车违法事件视频" \
+  --dump-video-results
+
+# C2 No-Metadata (32B Instruct, 复用C0缓存)
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
+  --output-dir outputs/ablation_v2_C2_no_metadata_32b_instruct \
+  --model qwen3-vl-32b-instruct \
+  --reuse-preprocess-dir outputs/ablation_v2_C0_32b_instruct/data \
+  --ablation-skip-metadata \
+  --acc-dir "D:/project2025/qwen235b/uploads/大样本事故数据集" \
+  --nonacc-dir "D:/project2025/qwen235b/uploads/大样本非交通事故数据集" \
+  --acc-exclude-subdir "非机动车违法事件视频" \
+  --extra-nonacc-dir "D:/project2025/qwen235b/uploads/大样本事故数据集/非机动车违法事件视频" \
+  --dump-video-results
+
+# C6 Minimal (32B AWQ, 远程vLLM)
+d:/project2025/qwen235b/venv/Scripts/python.exe tools/run_eval_to_output.py \
+  --output-dir outputs/ablation_v2_C6_minimal_32b_awq \
+  --model qwen3-vl-32b \
+  --ablation-skip-mog2 --ablation-skip-siglip --ablation-disable-yolo --ablation-force-uniform \
+  --acc-dir "D:/project2025/qwen235b/uploads/大样本事故数据集" \
+  --nonacc-dir "D:/project2025/qwen235b/uploads/大样本非交通事故数据集" \
+  --acc-exclude-subdir "非机动车违法事件视频" \
+  --extra-nonacc-dir "D:/project2025/qwen235b/uploads/大样本事故数据集/非机动车违法事件视频" \
+  --dump-video-results
+```
+
+### 预期假设
+
+| 假设 | 预测 | 验证对比 |
+|------|------|---------|
+| H1: SigLIP 贡献有限 | Delta-F1 < 2% | C0 vs C1 |
+| H2: Metadata 文本可能干扰 VLM | C2 的 F1 >= C0 | C0 vs C2 |
+| H3: YOLO 主要贡献在选帧而非 metadata | C4 下降 > C2 下降 | C2 vs C4 |
+| H4: Minimal 条件 F1 仍 >85% | VLM 视觉能力很强 | C6 结果 |
+| H5: MOG2+SigLIP 对 FPR 有正贡献 | C6 FPR > C0 FPR | C0 vs C6 |
 
 ---
 
@@ -500,3 +729,116 @@ RTSP URL 格式: `rtsp://admin:baidu123@{IP}:554/Streaming/Channels/102?transpor
 | 报告周期 | 每 4 小时 |
 | 报告内容 | 事故检测统计、违法行为统计、系统健康状态 |
 | 存储位置 | `/data/app/outputs/reports/` |
+
+---
+
+## 待办：磁盘自动清理机制（紧急）
+
+### 背景问题
+
+22 路摄像头 7×24 运行，`/data1` 已用 958GB/1.8TB (58%)。现有清理机制有 3 个盲区，不处理会在 1-2 天内写满磁盘。
+
+### 现有清理机制与盲区
+
+| 数据路径 | 当前清理者 | 状态 |
+|----------|-----------|------|
+| `/data1/videos/rtsp_recordings/seg_*.mp4` | rtsp_ingest（时间戳 > 2h） | ✅ OK |
+| `/data1/videos/windows/window_*.mp4` | **无** | **危险，无清理** |
+| `/data1/frames/{job_id}/` | semantic_base（分析完成后） | 有 orphan 风险 |
+| `/data1/results/` | **无** | 累积中 (217MB) |
+| `/data1/positive_events/` | **无** | 累积中 (4.2GB) |
+
+### 方案：K8S CronJob + 独立清理脚本
+
+**设计原则**：只添加新文件，不修改现有 worker 代码。
+
+#### 保留策略
+
+| 数据类型 | 保留时间 | 理由 |
+|----------|----------|------|
+| RTSP 分片 (seg_*.mp4) | 2h | 已有实现，保持不变 |
+| Window 文件 (window_*.mp4) | 2h | 与 RTSP 分片对齐 |
+| 帧目录 (/data1/frames/*) | 30min orphan 清理 | 正常处理 < 5min，30min 足够 Event Collector 复制 |
+| 分析结果 (/data1/results/) | 7 天 | 调试和审计需要 |
+| 阳性事件 (/data1/positive_events/) | 30 天 | 事故证据保留期 |
+
+#### 紧急磁盘压力保护
+
+磁盘剩余 < 100GB 时启用激进模式：window 保留 30min、orphan 帧 10min、results 3 天。
+
+#### 实现步骤
+
+1. **新建 `workers/storage_cleanup.py`**：独立清理脚本，基于 mtime 判断文件年龄，支持 `--dry-run`，flock 防并发，JSON 日志输出
+2. **新建 `k8s/30-storage-cleanup.yaml`**：CronJob 每 30 分钟执行，`concurrencyPolicy: Forbid`，`activeDeadlineSeconds: 600`
+3. **部署验证**：`kubectl create job --from=cronjob/storage-cleanup test-cleanup -n traffic-vlm`
+
+#### 涉及文件
+
+| 文件 | 操作 |
+|------|------|
+| `workers/storage_cleanup.py` | 新建 |
+| `k8s/30-storage-cleanup.yaml` | 新建 |
+| `docker/analyzer-v2.Dockerfile` | 可能修改（确保 COPY 进镜像） |
+
+<!-- gitnexus:start -->
+# GitNexus MCP
+
+This project is indexed by GitNexus as **qwen235b** (41082 symbols, 45369 relationships, 300 execution flows).
+
+GitNexus provides a knowledge graph over this codebase — call chains, blast radius, execution flows, and semantic search.
+
+## Always Start Here
+
+For any task involving code understanding, debugging, impact analysis, or refactoring, you must:
+
+1. **Read `gitnexus://repo/{name}/context`** — codebase overview + check index freshness
+2. **Match your task to a skill below** and **read that skill file**
+3. **Follow the skill's workflow and checklist**
+
+> If step 1 warns the index is stale, run `npx gitnexus analyze` in the terminal first.
+
+## Skills
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/refactoring/SKILL.md` |
+
+## Tools Reference
+
+| Tool | What it gives you |
+|------|-------------------|
+| `query` | Process-grouped code intelligence — execution flows related to a concept |
+| `context` | 360-degree symbol view — categorized refs, processes it participates in |
+| `impact` | Symbol blast radius — what breaks at depth 1/2/3 with confidence |
+| `detect_changes` | Git-diff impact — what do your current changes affect |
+| `rename` | Multi-file coordinated rename with confidence-tagged edits |
+| `cypher` | Raw graph queries (read `gitnexus://repo/{name}/schema` first) |
+| `list_repos` | Discover indexed repos |
+
+## Resources Reference
+
+Lightweight reads (~100-500 tokens) for navigation:
+
+| Resource | Content |
+|----------|---------|
+| `gitnexus://repo/{name}/context` | Stats, staleness check |
+| `gitnexus://repo/{name}/clusters` | All functional areas with cohesion scores |
+| `gitnexus://repo/{name}/cluster/{clusterName}` | Area members |
+| `gitnexus://repo/{name}/processes` | All execution flows |
+| `gitnexus://repo/{name}/process/{processName}` | Step-by-step trace |
+| `gitnexus://repo/{name}/schema` | Graph schema for Cypher |
+
+## Graph Schema
+
+**Nodes:** File, Function, Class, Interface, Method, Community, Process
+**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS
+
+```cypher
+MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "myFunc"})
+RETURN caller.name, caller.filePath
+```
+
+<!-- gitnexus:end -->

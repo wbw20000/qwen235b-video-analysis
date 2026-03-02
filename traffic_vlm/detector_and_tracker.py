@@ -44,7 +44,7 @@ class DetectorAndTracker:
 
     def run_on_frames(self, frames: List[Tuple[float, "np.ndarray"]]) -> Dict:
         if not self.config.enabled or self.model is None:
-            print(f"[DetectorAndTracker] 检测器未启用: enabled={self.config.enabled}, model={'已加载' if self.model else 'None'}")
+            print(f"[DetectorAndTracker] detector disabled: enabled={self.config.enabled}, model={'loaded' if self.model else 'None'}")
             return {"tracks": {}, "frame_results": []}
 
         # 重置跟踪器，确保每个clip从干净状态开始
@@ -53,7 +53,7 @@ class DetectorAndTracker:
         tracks: Dict[int, Dict] = {}
         frame_results = []
 
-        print(f"[DetectorAndTracker] 输入帧数: {len(frames)}")
+        print(f"[DetectorAndTracker] input frames: {len(frames)}")
 
         # 标记是否已回退到 FP32（避免每帧重复打印）
         _half_fallback_logged = False
@@ -76,14 +76,14 @@ class DetectorAndTracker:
                 except TypeError as e:
                     if "half" in str(e):
                         if not _half_fallback_logged:
-                            print("[DetectorAndTracker] ⚠️ track() 不支持 half 参数，回退到 FP32")
+                            print("[DetectorAndTracker] track() half not supported, fallback to FP32")
                             _half_fallback_logged = True
                         preds = self.model.track(frame, **track_kwargs)
                     else:
                         raise
             except Exception as e:
                 # 不再 break，继续处理后续帧
-                print(f"[DetectorAndTracker] ⚠️ 帧 {ts:.3f}s 检测异常: {e}")
+                print(f"[DetectorAndTracker] frame {ts:.3f}s detect error: {e}")
 
             detections = []
             if preds:
@@ -117,9 +117,12 @@ class DetectorAndTracker:
 
             frame_results.append({"timestamp": ts, "detections": detections})
             detected_ids = [d['track_id'] for d in detections]
-            print(f"[DetectorAndTracker] 帧 {ts:.3f}s 检测到 {len(detections)} 个目标, IDs: {detected_ids}")
+            try:
+                print(f"[DetectorAndTracker] frame {ts:.3f}s detected {len(detections)} objects, IDs: {detected_ids}")
+            except OSError:
+                pass  # Windows console encoding issue — ignore print failure
 
-        print(f"[DetectorAndTracker] 输出 frame_results 长度: {len(frame_results)}, tracks 数量: {len(tracks)}")
+        print(f"[DetectorAndTracker] output frame_results: {len(frame_results)}, tracks: {len(tracks)}")
         return {"tracks": tracks, "frame_results": frame_results}
 
     def run_on_frames_batched(
@@ -147,7 +150,7 @@ class DetectorAndTracker:
             return self.run_on_frames(frames)
 
         # 批量检测模式（不跟踪）
-        print(f"[DetectorAndTracker] 批量检测模式，batch_size={batch_size}，共{len(frames)}帧")
+        print(f"[DetectorAndTracker] batch mode, batch_size={batch_size}, total {len(frames)} frames")
 
         frame_results = []
         timestamps = [ts for ts, _ in frames]
@@ -190,12 +193,12 @@ class DetectorAndTracker:
                     frame_results.append({"timestamp": ts, "detections": detections})
 
             except Exception as e:
-                print(f"[DetectorAndTracker] ⚠️ 批量检测异常: {e}")
+                print(f"[DetectorAndTracker] batch detect error: {e}")
                 # 回退到逐帧处理
                 for ts, frame in zip(batch_ts, batch_frames):
                     frame_results.append({"timestamp": ts, "detections": []})
 
-        print(f"[DetectorAndTracker] 批量检测完成，共处理{len(frame_results)}帧")
+        print(f"[DetectorAndTracker] batch done, processed {len(frame_results)} frames")
         return {"tracks": {}, "frame_results": frame_results}
 
     def detect_batch(
@@ -243,7 +246,7 @@ class DetectorAndTracker:
                     all_detections.append(frame_dets)
 
             except Exception as e:
-                print(f"[DetectorAndTracker] ⚠️ detect_batch异常: {e}")
+                print(f"[DetectorAndTracker] detect_batch error: {e}")
                 all_detections.extend([[] for _ in batch])
 
         return all_detections

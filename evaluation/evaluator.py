@@ -201,6 +201,7 @@ def predict_file(
         # pred_label优先级: YES > UNCERTAIN > NO
         pred_label = "NO"
         has_uncertain = False
+        vlm_called_count = 0
 
         for r in final_results:
             clip = r.get("clip", {})
@@ -213,12 +214,17 @@ def predict_file(
             confidence = vlm_output.get("confidence", 0.0)
             kept = vlm_output.get("retain_flag", vlm_output.get("kept", False))
             keep_reason = vlm_output.get("retain_reason", vlm_output.get("keep_reason", ""))
+            vlm_called_count += 1
 
-            # 基于verdict更新pred_label（优先级: YES > UNCERTAIN > NO）
+            # 基于verdict更新pred_label（优先级: YES > POST_EVENT_ONLY > UNCERTAIN > NO）
             if verdict == "YES":
                 pred_label = "YES"
                 if not decision_reason.startswith("检测到事故"):
                     decision_reason = f"检测到事故: clip={clip.get('clip_id')}, verdict=YES"
+            elif verdict == "POST_EVENT_ONLY" and pred_label != "YES":
+                pred_label = "YES"
+                if not decision_reason.startswith("检测到事故"):
+                    decision_reason = f"检测到事故(后果): clip={clip.get('clip_id')}, verdict=POST_EVENT_ONLY"
             elif verdict == "UNCERTAIN" and pred_label != "YES":
                 pred_label = "UNCERTAIN"
                 has_uncertain = True
@@ -234,6 +240,10 @@ def predict_file(
                 kept=kept,
                 keep_reason=keep_reason,
             ))
+
+        # 修正 decision_reason: 区分"无clip通过阈值"和"VLM全判NO"
+        if pred_label == "NO" and vlm_called_count > 0:
+            decision_reason = f"VLM全判NO ({vlm_called_count}个clip均判定无事故)"
 
         # predicted_has_accident 现在仅在 pred_label=="YES" 时为True（STRICT模式）
         # CONSERVATIVE模式可以在外层通过 pred_label in ("YES", "UNCERTAIN") 判断

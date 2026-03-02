@@ -91,11 +91,11 @@ class VLMConfig:
     top_clips: int = 3
     annotated_frames_per_clip: int = 6
     accident_frames_per_clip: int = 12  # 事故模式：发送更多帧给VLM
-    temperature: float = 0.4
+    temperature: float = 0.0               # greedy decoding，消除VLM随机性
 
     # 模型sweep参数透传
     top_p: float = 1.0                   # top_p采样参数
-    max_tokens: int = 2000               # 最大输出token数
+    max_tokens: int = 8192               # 最大输出token数（Qwen3.5 thinking模型需要更多空间）
     repetition_penalty: float = 1.0      # 重复惩罚系数
 
     # P0优化：VLM调用阈值过滤
@@ -108,8 +108,8 @@ class VLMConfig:
                                         # confidence >= clip_score_threshold → YES (if verdict=YES)
 
     # P0优化：图像压缩减少传输（当前已关闭，发送原始标注图片）
-    image_max_width: int = 640          # 图像最大宽度（像素）
-    image_quality: int = 70             # JPEG压缩质量（1-100）
+    image_max_width: int = 1280         # 图像最大宽度（像素）— 从640提升到1280，改善4K路侧视频小目标识别
+    image_quality: int = 80             # JPEG压缩质量（1-100）— 从70提升到80，减少压缩伪影
     compress_images: bool = True        # 是否启用图像压缩（True=压缩后发送）
 
     # VLM并行调用配置
