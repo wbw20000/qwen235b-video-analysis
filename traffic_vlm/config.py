@@ -118,6 +118,11 @@ class VLMConfig:
     # 预处理缓存复用（消融测试加速）
     reuse_preprocess_dir: Optional[str] = None  # 复用预处理缓存的base_dir路径
 
+    # Image RAG — 视觉样本检索注入（Phase B, Unleashing VLMs arXiv:2601.10551）
+    accident_rag_enabled: bool = False                           # 人工确认 exemplar 帧后设为 True
+    accident_rag_exemplars_dir: str = "data/accident_exemplars"  # 已确认 TP 关键帧目录
+    accident_rag_top_k: int = 2                                  # 每次注入的样本帧数
+
     # VLM结果置信度分级（软过滤，降低误检率）
     confidence_confirmed_threshold: float = 0.7   # >= 0.7 为"确定事故"
     confidence_suspected_threshold: float = 0.4   # 0.4-0.7 为"疑似事故"
@@ -778,6 +783,18 @@ class BatchProcessConfig:
 
 
 @dataclass
+class AccidentRAGConfig:
+    """Image RAG — 视觉样本检索注入配置（Phase B, Unleashing VLMs arXiv:2601.10551）"""
+
+    enabled: bool = False                         # 默认关闭；人工确认 exemplar 帧后设为 True
+    exemplars_dir: str = "data/accident_exemplars"  # 已确认 TP 事故关键帧目录
+    top_k: int = 2                                # 每次注入的样本帧数
+    # 注入图片的压缩参数（小图减少 token 消耗）
+    max_width: int = 640
+    quality: int = 75
+
+
+@dataclass
 class TrafficVLMConfig:
     """整体配置聚合。"""
 
@@ -800,6 +817,7 @@ class TrafficVLMConfig:
     progressive_vlm: ProgressiveVLMConfig = field(default_factory=ProgressiveVLMConfig)
     stage3: Stage3Config = field(default_factory=Stage3Config)
     narrative_sidecar: NarrativeSidecarConfig = field(default_factory=NarrativeSidecarConfig)
+    accident_rag: AccidentRAGConfig = field(default_factory=AccidentRAGConfig)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()

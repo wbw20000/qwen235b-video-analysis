@@ -584,6 +584,19 @@ class VLMClient:
         self.config = config
         self._using_local_vllm = bool(vllm_base_url)
 
+        # Image RAG — 懒加载（仅当 accident_rag_enabled=True 时初始化）
+        self._rag_db = None
+        if getattr(config, "accident_rag_enabled", False):
+            try:
+                from .accident_rag import AccidentRAGDatabase
+                self._rag_db = AccidentRAGDatabase(
+                    exemplars_dir=getattr(config, "accident_rag_exemplars_dir", "data/accident_exemplars")
+                )
+                _safe_print(f"[ImageRAG] 已加载 exemplar 库: {self._rag_db.stats()}")
+            except Exception as e:
+                _safe_print(f"[ImageRAG] 初始化失败，跳过: {e}")
+                self._rag_db = None
+
     def build_user_prompt(
         self,
         intersection_info: Dict,
@@ -1249,6 +1262,30 @@ class VLMClient:
         )
 
         contents: List[Dict] = [{"type": "text", "text": user_prompt}]
+
+        # Image RAG — 在视频帧前注入已确认事故参考样本（Unleashing VLMs arXiv:2601.10551）
+        if self._rag_db is not None and self._rag_db.is_ready():
+            cam_type = self._detect_camera_type(clip_info)
+            top_k = getattr(self.config, "accident_rag_top_k", 2)
+            exemplar_paths = self._rag_db.retrieve(cam_type=cam_type, top_k=top_k)
+            if exemplar_paths:
+                contents.append({
+                    "type": "text",
+                    "text": (
+                        "【已确认事故参考样本（仅供视觉对比，不代表本视频一定有事故）】\n"
+                        f"以下 {len(exemplar_paths)} 张图片来自已确认的真实事故视频（{cam_type} 类摄像机），"
+                        "请对比本视频帧，识别类似的视觉模式：\n"
+                        "（参考样本结束后的帧才是当前待分析视频）"
+                    ),
+                })
+                rag_max_w = getattr(self.config, "accident_rag_max_width", 640)
+                for ep in exemplar_paths:
+                    contents.append({
+                        "type": "image_url",
+                        "image_url": {"url": image_to_base64_url(ep, max_width=rag_max_w, quality=75)},
+                    })
+                contents.append({"type": "text", "text": "--- 以下为当前待分析视频帧 ---"})
+                _safe_print(f"[ImageRAG] 注入 {len(exemplar_paths)} 张 {cam_type} exemplar 帧")
 
         # 根据模式确定帧数限制
         if mode == "FAST":
