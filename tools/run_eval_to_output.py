@@ -61,6 +61,12 @@ def main():
                         help='消融测试：跳过 MOG2 运动检测')
     parser.add_argument('--ablation-suppress-motion-peak', action='store_true',
                         help='方案A：压制 motion_peak 选帧信号（权重清零），保留其他信号')
+    parser.add_argument('--enable-accident-rag', action='store_true',
+                        help='Phase B: 开启 Image RAG 视觉样本注入（需先确认 data/accident_exemplars/ 帧内容）')
+    parser.add_argument('--accident-rag-dir', type=str, default=None,
+                        help='Image RAG exemplar 目录（默认 data/accident_exemplars）')
+    parser.add_argument('--accident-rag-top-k', type=int, default=2,
+                        help='每次注入的 exemplar 帧数（默认 2）')
     parser.add_argument('--vllm-url', type=str, default=None,
                         help='本地 vLLM 端点 URL（如 http://100.105.223.57:8000/v1），覆盖 VLLM_BASE_URL 环境变量')
     # 数据集处理参数
@@ -145,6 +151,14 @@ def main():
     if args.reuse_preprocess:
         config["reuse_preprocess_dir"] = args.reuse_preprocess
         print(f"  复用预处理: {args.reuse_preprocess}")
+
+    # Phase B: Image RAG
+    if args.enable_accident_rag:
+        config["accident_rag_enabled"] = True
+        config["accident_rag_top_k"] = args.accident_rag_top_k
+        if args.accident_rag_dir:
+            config["accident_rag_exemplars_dir"] = args.accident_rag_dir
+        print(f"  [Phase B] Image RAG: 启用 (top_k={args.accident_rag_top_k})")
 
     # vLLM 端点覆盖（优先级高于 VLLM_BASE_URL 环境变量）
     if args.vllm_url:

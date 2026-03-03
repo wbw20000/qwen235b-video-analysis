@@ -168,6 +168,14 @@ def predict_file(
         if "reuse_preprocess_dir" in config:
             vlm_config.vlm.reuse_preprocess_dir = config["reuse_preprocess_dir"]
 
+        # Phase B: Image RAG
+        if config.get("accident_rag_enabled"):
+            vlm_config.vlm.accident_rag_enabled = True
+            if "accident_rag_exemplars_dir" in config:
+                vlm_config.vlm.accident_rag_exemplars_dir = config["accident_rag_exemplars_dir"]
+            if "accident_rag_top_k" in config:
+                vlm_config.vlm.accident_rag_top_k = config["accident_rag_top_k"]
+
         # 中间数据存储隔离：按 output_dir 隔离 data/
         if "base_dir" in config:
             vlm_config.datastore.base_dir = config["base_dir"]
