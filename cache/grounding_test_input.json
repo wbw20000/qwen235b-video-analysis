@@ -1,0 +1,3034 @@
+{
+  "video_name": "08-207号路口-非机动车逆行",
+  "clip_id": "clip-fe448cc8",
+  "source_file": "08-207号路口-非机动车逆行.result.json.gz",
+  "video_width": 4096,
+  "video_height": 2160,
+  "s2_frames": [
+    {
+      "frame_idx": 0,
+      "clip_frame_idx": 0,
+      "timestamp": 0.0,
+      "reasons": [
+        "uniform_first"
+      ],
+      "score": 0.0,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_000.000_annotated.jpg"
+    },
+    {
+      "frame_idx": 1,
+      "clip_frame_idx": 1,
+      "timestamp": 1.9055555555555554,
+      "reasons": [
+        "uniform_base"
+      ],
+      "score": 0.36666665744541466,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_001.906_annotated.jpg"
+    },
+    {
+      "frame_idx": 2,
+      "clip_frame_idx": 2,
+      "timestamp": 3.811111111111111,
+      "reasons": [
+        "motion_peak",
+        "trajectory_break"
+      ],
+      "score": 0.30309866986928147,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_003.811_annotated.jpg"
+    },
+    {
+      "frame_idx": 3,
+      "clip_frame_idx": 4,
+      "timestamp": 7.622222222222222,
+      "reasons": [
+        "uniform_base"
+      ],
+      "score": 0.18207571944657353,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_007.622_annotated.jpg"
+    },
+    {
+      "frame_idx": 4,
+      "clip_frame_idx": 5,
+      "timestamp": 9.527777777777777,
+      "reasons": [
+        "trajectory_break"
+      ],
+      "score": 0.25277688426728795,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_009.528_annotated.jpg"
+    },
+    {
+      "frame_idx": 5,
+      "clip_frame_idx": 6,
+      "timestamp": 11.433333333333334,
+      "reasons": [
+        "trajectory_break"
+      ],
+      "score": 0.21437697210358903,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_011.433_annotated.jpg"
+    },
+    {
+      "frame_idx": 6,
+      "clip_frame_idx": 8,
+      "timestamp": 15.244444444444444,
+      "reasons": [
+        "uniform_base"
+      ],
+      "score": 0.1434844708560117,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_015.244_annotated.jpg"
+    },
+    {
+      "frame_idx": 7,
+      "clip_frame_idx": 10,
+      "timestamp": 19.055555555555554,
+      "reasons": [
+        "trajectory_break"
+      ],
+      "score": 0.2062702127212438,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_019.056_annotated.jpg"
+    },
+    {
+      "frame_idx": 8,
+      "clip_frame_idx": 11,
+      "timestamp": 20.96111111111111,
+      "reasons": [
+        "uniform_base"
+      ],
+      "score": 0.12327381851938829,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_020.961_annotated.jpg"
+    },
+    {
+      "frame_idx": 9,
+      "clip_frame_idx": 12,
+      "timestamp": 22.866666666666667,
+      "reasons": [
+        "default"
+      ],
+      "score": 0.13857170943525537,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_022.867_annotated.jpg"
+    },
+    {
+      "frame_idx": 10,
+      "clip_frame_idx": 14,
+      "timestamp": 26.677777777777774,
+      "reasons": [
+        "uniform_base"
+      ],
+      "score": 0.1883583381741081,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_026.678_annotated.jpg"
+    },
+    {
+      "frame_idx": 11,
+      "clip_frame_idx": 15,
+      "timestamp": 28.583333333333332,
+      "reasons": [
+        "uniform_last"
+      ],
+      "score": 0.20377809038285646,
+      "annotated_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/annotated_frames/camera-1_20260213_clip-fe448cc8_028.583_annotated.jpg"
+    }
+  ],
+  "yolo_detections_per_frame": {
+    "0": [
+      {
+        "track_id": 1,
+        "category": "bus",
+        "bbox_xyxy": [
+          2542.4,
+          657.6,
+          3185.6,
+          937.6
+        ],
+        "score": 0.9214
+      },
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3801.6,
+          761.6,
+          3865.6,
+          947.2
+        ],
+        "score": 0.8301
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1422.4,
+          266.0,
+          1494.4,
+          321.2
+        ],
+        "score": 0.8267
+      },
+      {
+        "track_id": 4,
+        "category": "car",
+        "bbox_xyxy": [
+          2044.8,
+          1427.2,
+          2553.6,
+          1948.8
+        ],
+        "score": 0.7676
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1964.8,
+          94.4,
+          1996.8,
+          171.2
+        ],
+        "score": 0.7139
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1755.2,
+          81.2,
+          1790.4,
+          170.2
+        ],
+        "score": 0.5391
+      },
+      {
+        "track_id": 7,
+        "category": "truck",
+        "bbox_xyxy": [
+          1761.6,
+          261.4,
+          1832.0,
+          327.0
+        ],
+        "score": 0.5234
+      },
+      {
+        "track_id": 8,
+        "category": "truck",
+        "bbox_xyxy": [
+          2003.2,
+          326.8,
+          2086.4,
+          403.6
+        ],
+        "score": 0.4941
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1500.8,
+          181.0,
+          1537.6,
+          211.0
+        ],
+        "score": 0.4863
+      },
+      {
+        "track_id": 10,
+        "category": "car",
+        "bbox_xyxy": [
+          1571.2,
+          150.0,
+          1601.6,
+          183.6
+        ],
+        "score": 0.4397
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3510.4,
+          211.8,
+          3561.6,
+          316.6
+        ],
+        "score": 0.3999
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2003.2,
+          327.2,
+          2086.4,
+          403.2
+        ],
+        "score": 0.385
+      },
+      {
+        "track_id": 13,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3686.4,
+          238.0,
+          3744.0,
+          377.6
+        ],
+        "score": 0.385
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3020.8,
+          503.6,
+          3174.4,
+          657.2
+        ],
+        "score": 0.3721
+      },
+      {
+        "track_id": 15,
+        "category": "person",
+        "bbox_xyxy": [
+          3564.8,
+          1171.2,
+          3590.4,
+          1235.2
+        ],
+        "score": 0.3594
+      },
+      {
+        "track_id": 16,
+        "category": "person",
+        "bbox_xyxy": [
+          3635.2,
+          1147.2,
+          3660.8,
+          1201.6
+        ],
+        "score": 0.355
+      },
+      {
+        "track_id": 17,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1756.8,
+          79.3,
+          1788.8,
+          115.9
+        ],
+        "score": 0.3242
+      }
+    ],
+    "1": [
+      {
+        "track_id": 1,
+        "category": "bus",
+        "bbox_xyxy": [
+          2921.3,
+          674.4,
+          3557.9,
+          952.8
+        ],
+        "score": 0.897
+      },
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3801.8,
+          762.4,
+          3865.4,
+          946.4
+        ],
+        "score": 0.8267
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1419.0,
+          270.8,
+          1492.9,
+          327.2
+        ],
+        "score": 0.7866
+      },
+      {
+        "track_id": 4,
+        "category": "car",
+        "bbox_xyxy": [
+          2060.7,
+          1417.0,
+          2522.0,
+          1886.0
+        ],
+        "score": 0.5469
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1964.8,
+          94.2,
+          1996.8,
+          171.2
+        ],
+        "score": 0.6655
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1755.6,
+          81.2,
+          1790.0,
+          168.2
+        ],
+        "score": 0.585
+      },
+      {
+        "track_id": 7,
+        "category": "truck",
+        "bbox_xyxy": [
+          1759.8,
+          261.4,
+          1830.6,
+          327.4
+        ],
+        "score": 0.5352
+      },
+      {
+        "track_id": 8,
+        "category": "truck",
+        "bbox_xyxy": [
+          2002.5,
+          325.8,
+          2087.1,
+          404.0
+        ],
+        "score": 0.4727
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1498.8,
+          180.4,
+          1538.0,
+          211.6
+        ],
+        "score": 0.5962
+      },
+      {
+        "track_id": 10,
+        "category": "car",
+        "bbox_xyxy": [
+          1569.2,
+          144.9,
+          1602.0,
+          181.4
+        ],
+        "score": 0.2134
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3510.8,
+          212.0,
+          3561.2,
+          315.2
+        ],
+        "score": 0.4148
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2002.9,
+          326.6,
+          2086.7,
+          403.2
+        ],
+        "score": 0.3433
+      },
+      {
+        "track_id": 13,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3686.2,
+          239.2,
+          3744.2,
+          380.0
+        ],
+        "score": 0.4092
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3025.1,
+          502.4,
+          3176.5,
+          653.6
+        ],
+        "score": 0.2878
+      },
+      {
+        "track_id": 15,
+        "category": "person",
+        "bbox_xyxy": [
+          3567.4,
+          1169.6,
+          3594.2,
+          1236.8
+        ],
+        "score": 0.3303
+      },
+      {
+        "track_id": 16,
+        "category": "person",
+        "bbox_xyxy": [
+          3635.2,
+          1147.2,
+          3660.8,
+          1201.6
+        ],
+        "score": 0.3694
+      }
+    ],
+    "2": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3806.5,
+          761.6,
+          3867.1,
+          931.4
+        ],
+        "score": 0.6094
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1410.2,
+          274.4,
+          1488.9,
+          334.5
+        ],
+        "score": 0.7705
+      },
+      {
+        "track_id": 4,
+        "category": "car",
+        "bbox_xyxy": [
+          2065.8,
+          1389.0,
+          2516.6,
+          1843.4
+        ],
+        "score": 0.5718
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1966.8,
+          91.6,
+          1997.9,
+          166.0
+        ],
+        "score": 0.5601
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1758.2,
+          78.8,
+          1793.8,
+          169.8
+        ],
+        "score": 0.7075
+      },
+      {
+        "track_id": 7,
+        "category": "truck",
+        "bbox_xyxy": [
+          1753.6,
+          259.2,
+          1827.2,
+          326.4
+        ],
+        "score": 0.4282
+      },
+      {
+        "track_id": 8,
+        "category": "truck",
+        "bbox_xyxy": [
+          2005.7,
+          327.0,
+          2087.1,
+          402.4
+        ],
+        "score": 0.3667
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1507.2,
+          181.6,
+          1545.4,
+          211.2
+        ],
+        "score": 0.5757
+      },
+      {
+        "track_id": 10,
+        "category": "car",
+        "bbox_xyxy": [
+          1573.3,
+          153.5,
+          1597.9,
+          179.7
+        ],
+        "score": 0.459
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3509.8,
+          212.8,
+          3562.2,
+          320.0
+        ],
+        "score": 0.644
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2004.4,
+          328.4,
+          2085.2,
+          402.0
+        ],
+        "score": 0.5137
+      },
+      {
+        "track_id": 13,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3687.3,
+          238.0,
+          3749.6,
+          388.5
+        ],
+        "score": 0.4187
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3021.4,
+          505.6,
+          3173.8,
+          657.6
+        ],
+        "score": 0.459
+      },
+      {
+        "track_id": 16,
+        "category": "person",
+        "bbox_xyxy": [
+          3635.2,
+          1145.6,
+          3660.8,
+          1200.0
+        ],
+        "score": 0.2524
+      }
+    ],
+    "3": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3799.6,
+          761.0,
+          3868.4,
+          948.3
+        ],
+        "score": 0.7866
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1377.6,
+          291.7,
+          1462.1,
+          354.9
+        ],
+        "score": 0.7759
+      },
+      {
+        "track_id": 4,
+        "category": "car",
+        "bbox_xyxy": [
+          2060.5,
+          1384.0,
+          2521.9,
+          1841.6
+        ],
+        "score": 0.7251
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1966.5,
+          91.2,
+          1998.3,
+          166.8
+        ],
+        "score": 0.6245
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1755.7,
+          79.6,
+          1789.9,
+          169.2
+        ],
+        "score": 0.7358
+      },
+      {
+        "track_id": 7,
+        "category": "truck",
+        "bbox_xyxy": [
+          1751.6,
+          259.2,
+          1826.0,
+          324.0
+        ],
+        "score": 0.4495
+      },
+      {
+        "track_id": 8,
+        "category": "truck",
+        "bbox_xyxy": [
+          2004.0,
+          327.2,
+          2085.6,
+          404.0
+        ],
+        "score": 0.3684
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1510.9,
+          183.6,
+          1551.5,
+          214.0
+        ],
+        "score": 0.5117
+      },
+      {
+        "track_id": 10,
+        "category": "car",
+        "bbox_xyxy": [
+          1570.8,
+          148.1,
+          1598.8,
+          176.8
+        ],
+        "score": 0.2974
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3510.3,
+          214.4,
+          3561.7,
+          319.6
+        ],
+        "score": 0.6655
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2003.9,
+          328.4,
+          2085.7,
+          403.6
+        ],
+        "score": 0.4417
+      },
+      {
+        "track_id": 13,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3688.3,
+          239.2,
+          3748.5,
+          384.0
+        ],
+        "score": 0.4358
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3023.8,
+          504.8,
+          3177.8,
+          658.4
+        ],
+        "score": 0.4092
+      }
+    ],
+    "4": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3799.3,
+          760.0,
+          3867.9,
+          947.2
+        ],
+        "score": 0.8276
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1356.2,
+          299.8,
+          1443.7,
+          364.2
+        ],
+        "score": 0.8301
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2060.0,
+          1385.6,
+          2522.4,
+          1840.0
+        ],
+        "score": 0.5581
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1968.1,
+          94.0,
+          1999.9,
+          169.4
+        ],
+        "score": 0.354
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1757.4,
+          80.0,
+          1791.4,
+          168.8
+        ],
+        "score": 0.6167
+      },
+      {
+        "track_id": 7,
+        "category": "car",
+        "bbox_xyxy": [
+          1757.9,
+          266.1,
+          1826.0,
+          325.0
+        ],
+        "score": 0.3311
+      },
+      {
+        "track_id": 8,
+        "category": "car",
+        "bbox_xyxy": [
+          2003.9,
+          329.6,
+          2082.5,
+          403.2
+        ],
+        "score": 0.4207
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1510.2,
+          185.6,
+          1552.2,
+          217.2
+        ],
+        "score": 0.6372
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3511.6,
+          214.4,
+          3560.4,
+          313.7
+        ],
+        "score": 0.6387
+      },
+      {
+        "track_id": 12,
+        "category": "truck",
+        "bbox_xyxy": [
+          2004.2,
+          329.2,
+          2085.4,
+          403.6
+        ],
+        "score": 0.4092
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3021.8,
+          505.6,
+          3173.4,
+          656.8
+        ],
+        "score": 0.4187
+      }
+    ],
+    "5": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3799.0,
+          760.0,
+          3868.2,
+          947.2
+        ],
+        "score": 0.8291
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1327.4,
+          312.1,
+          1420.9,
+          380.2
+        ],
+        "score": 0.8389
+      },
+      {
+        "track_id": 4,
+        "category": "car",
+        "bbox_xyxy": [
+          2056.5,
+          1384.0,
+          2525.9,
+          1841.6
+        ],
+        "score": 0.7056
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1968.1,
+          93.8,
+          1999.9,
+          169.4
+        ],
+        "score": 0.4302
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1757.2,
+          79.8,
+          1791.6,
+          169.8
+        ],
+        "score": 0.6514
+      },
+      {
+        "track_id": 7,
+        "category": "car",
+        "bbox_xyxy": [
+          1752.8,
+          266.4,
+          1821.6,
+          324.4
+        ],
+        "score": 0.291
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1507.7,
+          187.0,
+          1550.0,
+          218.2
+        ],
+        "score": 0.7026
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3511.9,
+          214.8,
+          3560.1,
+          312.0
+        ],
+        "score": 0.6841
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2004.4,
+          329.4,
+          2085.2,
+          403.2
+        ],
+        "score": 0.4668
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3022.8,
+          505.6,
+          3172.4,
+          654.4
+        ],
+        "score": 0.604
+      }
+    ],
+    "6": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3801.4,
+          758.4,
+          3872.2,
+          947.2
+        ],
+        "score": 0.8398
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1273.2,
+          333.8,
+          1378.6,
+          408.4
+        ],
+        "score": 0.814
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2048.5,
+          1384.0,
+          2527.5,
+          1844.8
+        ],
+        "score": 0.7295
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1962.3,
+          90.0,
+          1999.3,
+          176.6
+        ],
+        "score": 0.5312
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1757.3,
+          79.2,
+          1791.5,
+          169.8
+        ],
+        "score": 0.6094
+      },
+      {
+        "track_id": 7,
+        "category": "car",
+        "bbox_xyxy": [
+          1751.4,
+          262.8,
+          1819.9,
+          321.2
+        ],
+        "score": 0.2147
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1502.9,
+          188.0,
+          1549.9,
+          222.8
+        ],
+        "score": 0.6875
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3503.6,
+          214.8,
+          3568.4,
+          351.6
+        ],
+        "score": 0.5059
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2003.5,
+          328.4,
+          2086.1,
+          403.6
+        ],
+        "score": 0.5195
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3022.2,
+          505.6,
+          3173.0,
+          656.0
+        ],
+        "score": 0.5469
+      }
+    ],
+    "7": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3801.3,
+          760.8,
+          3872.3,
+          948.0
+        ],
+        "score": 0.7944
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1224.2,
+          358.7,
+          1346.1,
+          443.7
+        ],
+        "score": 0.814
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2050.8,
+          1384.0,
+          2531.6,
+          1841.6
+        ],
+        "score": 0.5815
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1964.4,
+          93.4,
+          1997.2,
+          169.5
+        ],
+        "score": 0.5527
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1756.2,
+          80.6,
+          1789.5,
+          169.6
+        ],
+        "score": 0.644
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1503.5,
+          192.2,
+          1552.5,
+          229.4
+        ],
+        "score": 0.7007
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3511.4,
+          211.7,
+          3560.6,
+          317.4
+        ],
+        "score": 0.6021
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2004.3,
+          329.0,
+          2085.3,
+          402.4
+        ],
+        "score": 0.6602
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3022.8,
+          506.4,
+          3172.4,
+          656.0
+        ],
+        "score": 0.7881
+      }
+    ],
+    "8": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3800.9,
+          760.4,
+          3872.7,
+          948.8
+        ],
+        "score": 0.8164
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1206.3,
+          372.8,
+          1328.1,
+          457.6
+        ],
+        "score": 0.8232
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2049.6,
+          1384.0,
+          2532.8,
+          1841.6
+        ],
+        "score": 0.5908
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1964.3,
+          92.8,
+          1997.3,
+          169.6
+        ],
+        "score": 0.6094
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1756.3,
+          80.6,
+          1789.3,
+          169.4
+        ],
+        "score": 0.6333
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1505.4,
+          197.9,
+          1550.6,
+          232.8
+        ],
+        "score": 0.6738
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3511.7,
+          211.6,
+          3560.3,
+          316.0
+        ],
+        "score": 0.6133
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2004.0,
+          329.2,
+          2085.6,
+          402.8
+        ],
+        "score": 0.5698
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3026.2,
+          506.4,
+          3175.4,
+          656.0
+        ],
+        "score": 0.728
+      }
+    ],
+    "9": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3808.4,
+          761.2,
+          3871.4,
+          925.4
+        ],
+        "score": 0.22
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1182.0,
+          388.2,
+          1313.5,
+          479.5
+        ],
+        "score": 0.8032
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2046.6,
+          1384.8,
+          2529.4,
+          1840.0
+        ],
+        "score": 0.6943
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1965.0,
+          94.6,
+          1996.6,
+          167.6
+        ],
+        "score": 0.6094
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1756.7,
+          79.4,
+          1788.9,
+          167.0
+        ],
+        "score": 0.6738
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1502.0,
+          199.6,
+          1549.2,
+          236.0
+        ],
+        "score": 0.5947
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3512.6,
+          214.4,
+          3559.4,
+          314.4
+        ],
+        "score": 0.5117
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2004.8,
+          330.0,
+          2084.8,
+          402.0
+        ],
+        "score": 0.5469
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3021.2,
+          504.0,
+          3174.0,
+          657.6
+        ],
+        "score": 0.6929
+      }
+    ],
+    "10": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3804.5,
+          762.4,
+          3875.5,
+          948.0
+        ],
+        "score": 0.832
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1114.4,
+          415.4,
+          1262.2,
+          515.5
+        ],
+        "score": 0.8164
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2045.8,
+          1383.2,
+          2536.6,
+          1843.2
+        ],
+        "score": 0.6001
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1965.8,
+          93.3,
+          2005.8,
+          185.0
+        ],
+        "score": 0.4036
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1757.0,
+          80.6,
+          1788.6,
+          166.2
+        ],
+        "score": 0.6704
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1503.4,
+          213.2,
+          1546.2,
+          245.2
+        ],
+        "score": 0.5566
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3507.1,
+          214.4,
+          3558.4,
+          322.9
+        ],
+        "score": 0.5449
+      },
+      {
+        "track_id": 12,
+        "category": "car",
+        "bbox_xyxy": [
+          2001.6,
+          328.2,
+          2084.8,
+          403.2
+        ],
+        "score": 0.5078
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3022.8,
+          506.4,
+          3172.4,
+          658.4
+        ],
+        "score": 0.541
+      }
+    ],
+    "11": [
+      {
+        "track_id": 2,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3801.3,
+          763.2,
+          3872.3,
+          948.8
+        ],
+        "score": 0.8345
+      },
+      {
+        "track_id": 3,
+        "category": "car",
+        "bbox_xyxy": [
+          1067.9,
+          428.0,
+          1222.9,
+          530.5
+        ],
+        "score": 0.8696
+      },
+      {
+        "track_id": 4,
+        "category": "truck",
+        "bbox_xyxy": [
+          2043.6,
+          1382.4,
+          2535.6,
+          1843.2
+        ],
+        "score": 0.583
+      },
+      {
+        "track_id": 5,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1961.5,
+          93.6,
+          2009.7,
+          203.4
+        ],
+        "score": 0.4436
+      },
+      {
+        "track_id": 6,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          1756.7,
+          79.6,
+          1788.9,
+          166.8
+        ],
+        "score": 0.6704
+      },
+      {
+        "track_id": 9,
+        "category": "car",
+        "bbox_xyxy": [
+          1500.7,
+          220.3,
+          1541.0,
+          249.1
+        ],
+        "score": 0.4746
+      },
+      {
+        "track_id": 11,
+        "category": "traffic_light",
+        "bbox_xyxy": [
+          3507.2,
+          214.8,
+          3558.4,
+          323.2
+        ],
+        "score": 0.5581
+      },
+      {
+        "track_id": 12,
+        "category": "truck",
+        "bbox_xyxy": [
+          2000.5,
+          327.2,
+          2085.9,
+          404.8
+        ],
+        "score": 0.4377
+      },
+      {
+        "track_id": 14,
+        "category": "truck",
+        "bbox_xyxy": [
+          3023.5,
+          506.4,
+          3171.7,
+          657.6
+        ],
+        "score": 0.5889
+      }
+    ]
+  },
+  "yolo_trajectories": {
+    "1": {
+      "category": "bus",
+      "frame_timestamps": [
+        0.0,
+        1.906
+      ],
+      "bbox_sequence": [
+        [
+          2542.4,
+          657.6,
+          3185.6,
+          937.6
+        ],
+        [
+          2921.3,
+          674.4,
+          3557.9,
+          952.8
+        ]
+      ]
+    },
+    "2": {
+      "category": "traffic_light",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          3801.6,
+          761.6,
+          3865.6,
+          947.2
+        ],
+        [
+          3801.8,
+          762.4,
+          3865.4,
+          946.4
+        ],
+        [
+          3806.5,
+          761.6,
+          3867.1,
+          931.4
+        ],
+        [
+          3802.1,
+          746.0,
+          3885.0,
+          976.7
+        ],
+        [
+          3799.6,
+          761.0,
+          3868.4,
+          948.3
+        ],
+        [
+          3799.3,
+          760.0,
+          3867.9,
+          947.2
+        ],
+        [
+          3799.0,
+          760.0,
+          3868.2,
+          947.2
+        ],
+        [
+          3801.9,
+          760.0,
+          3871.7,
+          947.2
+        ],
+        [
+          3801.4,
+          758.4,
+          3872.2,
+          947.2
+        ],
+        [
+          3801.5,
+          759.2,
+          3872.1,
+          946.4
+        ],
+        [
+          3801.3,
+          760.8,
+          3872.3,
+          948.0
+        ],
+        [
+          3800.9,
+          760.4,
+          3872.7,
+          948.8
+        ],
+        [
+          3808.4,
+          761.2,
+          3871.4,
+          925.4
+        ],
+        [
+          3797.6,
+          762.4,
+          3869.3,
+          948.5
+        ],
+        [
+          3804.5,
+          762.4,
+          3875.5,
+          948.0
+        ],
+        [
+          3801.3,
+          763.2,
+          3872.3,
+          948.8
+        ]
+      ]
+    },
+    "3": {
+      "category": "car",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          1422.4,
+          266.0,
+          1494.4,
+          321.2
+        ],
+        [
+          1419.0,
+          270.8,
+          1492.9,
+          327.2
+        ],
+        [
+          1410.2,
+          274.4,
+          1488.9,
+          334.5
+        ],
+        [
+          1397.0,
+          281.6,
+          1476.6,
+          341.6
+        ],
+        [
+          1377.6,
+          291.7,
+          1462.1,
+          354.9
+        ],
+        [
+          1356.2,
+          299.8,
+          1443.7,
+          364.2
+        ],
+        [
+          1327.4,
+          312.1,
+          1420.9,
+          380.2
+        ],
+        [
+          1303.9,
+          323.9,
+          1397.1,
+          390.4
+        ],
+        [
+          1273.2,
+          333.8,
+          1378.6,
+          408.4
+        ],
+        [
+          1251.7,
+          345.4,
+          1359.4,
+          420.8
+        ],
+        [
+          1224.2,
+          358.7,
+          1346.1,
+          443.7
+        ],
+        [
+          1206.3,
+          372.8,
+          1328.1,
+          457.6
+        ],
+        [
+          1182.0,
+          388.2,
+          1313.5,
+          479.5
+        ],
+        [
+          1157.1,
+          400.4,
+          1290.9,
+          492.4
+        ],
+        [
+          1114.4,
+          415.4,
+          1262.2,
+          515.5
+        ],
+        [
+          1067.9,
+          428.0,
+          1222.9,
+          530.5
+        ]
+      ]
+    },
+    "4": {
+      "category": "car",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          2044.8,
+          1427.2,
+          2553.6,
+          1948.8
+        ],
+        [
+          2060.7,
+          1417.0,
+          2522.0,
+          1886.0
+        ],
+        [
+          2065.8,
+          1389.0,
+          2516.6,
+          1843.4
+        ],
+        [
+          2061.2,
+          1383.2,
+          2521.2,
+          1843.2
+        ],
+        [
+          2060.5,
+          1384.0,
+          2521.9,
+          1841.6
+        ],
+        [
+          2060.0,
+          1385.6,
+          2522.4,
+          1840.0
+        ],
+        [
+          2056.5,
+          1384.0,
+          2525.9,
+          1841.6
+        ],
+        [
+          2052.0,
+          1383.2,
+          2527.2,
+          1843.2
+        ],
+        [
+          2048.5,
+          1384.0,
+          2527.5,
+          1844.8
+        ],
+        [
+          2047.2,
+          1384.0,
+          2528.8,
+          1844.8
+        ],
+        [
+          2050.8,
+          1384.0,
+          2531.6,
+          1841.6
+        ],
+        [
+          2049.6,
+          1384.0,
+          2532.8,
+          1841.6
+        ],
+        [
+          2046.6,
+          1384.8,
+          2529.4,
+          1840.0
+        ],
+        [
+          2045.6,
+          1384.8,
+          2530.4,
+          1840.0
+        ],
+        [
+          2045.8,
+          1383.2,
+          2536.6,
+          1843.2
+        ],
+        [
+          2043.6,
+          1382.4,
+          2535.6,
+          1843.2
+        ]
+      ]
+    },
+    "5": {
+      "category": "traffic_light",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          1964.8,
+          94.4,
+          1996.8,
+          171.2
+        ],
+        [
+          1964.8,
+          94.2,
+          1996.8,
+          171.2
+        ],
+        [
+          1966.8,
+          91.6,
+          1997.9,
+          166.0
+        ],
+        [
+          1966.6,
+          91.0,
+          1998.2,
+          166.2
+        ],
+        [
+          1966.5,
+          91.2,
+          1998.3,
+          166.8
+        ],
+        [
+          1968.1,
+          94.0,
+          1999.9,
+          169.4
+        ],
+        [
+          1968.1,
+          93.8,
+          1999.9,
+          169.4
+        ],
+        [
+          1962.3,
+          91.3,
+          1999.1,
+          178.0
+        ],
+        [
+          1962.3,
+          90.0,
+          1999.3,
+          176.6
+        ],
+        [
+          1963.1,
+          90.8,
+          1998.5,
+          173.2
+        ],
+        [
+          1964.4,
+          93.4,
+          1997.2,
+          169.5
+        ],
+        [
+          1964.3,
+          92.8,
+          1997.3,
+          169.6
+        ],
+        [
+          1965.0,
+          94.6,
+          1996.6,
+          167.6
+        ],
+        [
+          1964.9,
+          95.0,
+          1996.7,
+          168.4
+        ],
+        [
+          1965.8,
+          93.3,
+          2005.8,
+          185.0
+        ],
+        [
+          1961.5,
+          93.6,
+          2009.7,
+          203.4
+        ]
+      ]
+    },
+    "6": {
+      "category": "traffic_light",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          1755.2,
+          81.2,
+          1790.4,
+          170.2
+        ],
+        [
+          1755.6,
+          81.2,
+          1790.0,
+          168.2
+        ],
+        [
+          1758.2,
+          78.8,
+          1793.8,
+          169.8
+        ],
+        [
+          1755.3,
+          79.6,
+          1790.3,
+          170.0
+        ],
+        [
+          1755.7,
+          79.6,
+          1789.9,
+          169.2
+        ],
+        [
+          1757.4,
+          80.0,
+          1791.4,
+          168.8
+        ],
+        [
+          1757.2,
+          79.8,
+          1791.6,
+          169.8
+        ],
+        [
+          1755.8,
+          79.2,
+          1789.8,
+          169.2
+        ],
+        [
+          1757.3,
+          79.2,
+          1791.5,
+          169.8
+        ],
+        [
+          1757.4,
+          79.6,
+          1791.4,
+          169.6
+        ],
+        [
+          1756.2,
+          80.6,
+          1789.5,
+          169.6
+        ],
+        [
+          1756.3,
+          80.6,
+          1789.3,
+          169.4
+        ],
+        [
+          1756.7,
+          79.4,
+          1788.9,
+          167.0
+        ],
+        [
+          1758.1,
+          79.0,
+          1790.7,
+          167.2
+        ],
+        [
+          1757.0,
+          80.6,
+          1788.6,
+          166.2
+        ],
+        [
+          1756.7,
+          79.6,
+          1788.9,
+          166.8
+        ]
+      ]
+    },
+    "7": {
+      "category": "truck",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15
+      ],
+      "bbox_sequence": [
+        [
+          1761.6,
+          261.4,
+          1832.0,
+          327.0
+        ],
+        [
+          1759.8,
+          261.4,
+          1830.6,
+          327.4
+        ],
+        [
+          1753.6,
+          259.2,
+          1827.2,
+          326.4
+        ],
+        [
+          1753.1,
+          259.2,
+          1827.7,
+          325.6
+        ],
+        [
+          1751.6,
+          259.2,
+          1826.0,
+          324.0
+        ],
+        [
+          1757.9,
+          266.1,
+          1826.0,
+          325.0
+        ],
+        [
+          1752.8,
+          266.4,
+          1821.6,
+          324.4
+        ],
+        [
+          1753.9,
+          264.8,
+          1823.7,
+          323.6
+        ],
+        [
+          1751.4,
+          262.8,
+          1819.9,
+          321.2
+        ],
+        [
+          1745.2,
+          260.0,
+          1813.1,
+          318.8
+        ]
+      ]
+    },
+    "8": {
+      "category": "truck",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528
+      ],
+      "bbox_sequence": [
+        [
+          2003.2,
+          326.8,
+          2086.4,
+          403.6
+        ],
+        [
+          2002.5,
+          325.8,
+          2087.1,
+          404.0
+        ],
+        [
+          2005.7,
+          327.0,
+          2087.1,
+          402.4
+        ],
+        [
+          2004.5,
+          328.0,
+          2085.1,
+          403.2
+        ],
+        [
+          2004.0,
+          327.2,
+          2085.6,
+          404.0
+        ],
+        [
+          2003.9,
+          329.6,
+          2082.5,
+          403.2
+        ]
+      ]
+    },
+    "9": {
+      "category": "car",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          1500.8,
+          181.0,
+          1537.6,
+          211.0
+        ],
+        [
+          1498.8,
+          180.4,
+          1538.0,
+          211.6
+        ],
+        [
+          1507.2,
+          181.6,
+          1545.4,
+          211.2
+        ],
+        [
+          1510.6,
+          184.8,
+          1548.6,
+          213.6
+        ],
+        [
+          1510.9,
+          183.6,
+          1551.5,
+          214.0
+        ],
+        [
+          1510.2,
+          185.6,
+          1552.2,
+          217.2
+        ],
+        [
+          1507.7,
+          187.0,
+          1550.0,
+          218.2
+        ],
+        [
+          1506.2,
+          188.4,
+          1549.8,
+          220.4
+        ],
+        [
+          1502.9,
+          188.0,
+          1549.9,
+          222.8
+        ],
+        [
+          1503.4,
+          190.4,
+          1552.6,
+          227.2
+        ],
+        [
+          1503.5,
+          192.2,
+          1552.5,
+          229.4
+        ],
+        [
+          1505.4,
+          197.9,
+          1550.6,
+          232.8
+        ],
+        [
+          1502.0,
+          199.6,
+          1549.2,
+          236.0
+        ],
+        [
+          1503.7,
+          208.6,
+          1545.9,
+          240.7
+        ],
+        [
+          1503.4,
+          213.2,
+          1546.2,
+          245.2
+        ],
+        [
+          1500.7,
+          220.3,
+          1541.0,
+          249.1
+        ]
+      ]
+    },
+    "10": {
+      "category": "car",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622
+      ],
+      "bbox_sequence": [
+        [
+          1571.2,
+          150.0,
+          1601.6,
+          183.6
+        ],
+        [
+          1569.2,
+          144.9,
+          1602.0,
+          181.4
+        ],
+        [
+          1573.3,
+          153.5,
+          1597.9,
+          179.7
+        ],
+        [
+          1571.4,
+          149.6,
+          1599.8,
+          179.2
+        ],
+        [
+          1570.8,
+          148.1,
+          1598.8,
+          176.8
+        ]
+      ]
+    },
+    "11": {
+      "category": "traffic_light",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          3510.4,
+          211.8,
+          3561.6,
+          316.6
+        ],
+        [
+          3510.8,
+          212.0,
+          3561.2,
+          315.2
+        ],
+        [
+          3509.8,
+          212.8,
+          3562.2,
+          320.0
+        ],
+        [
+          3510.4,
+          214.4,
+          3561.6,
+          319.2
+        ],
+        [
+          3510.3,
+          214.4,
+          3561.7,
+          319.6
+        ],
+        [
+          3511.6,
+          214.4,
+          3560.4,
+          313.7
+        ],
+        [
+          3511.9,
+          214.8,
+          3560.1,
+          312.0
+        ],
+        [
+          3499.6,
+          215.2,
+          3565.6,
+          351.8
+        ],
+        [
+          3503.6,
+          214.8,
+          3568.4,
+          351.6
+        ],
+        [
+          3504.7,
+          214.8,
+          3567.3,
+          349.2
+        ],
+        [
+          3511.4,
+          211.7,
+          3560.6,
+          317.4
+        ],
+        [
+          3511.7,
+          211.6,
+          3560.3,
+          316.0
+        ],
+        [
+          3512.6,
+          214.4,
+          3559.4,
+          314.4
+        ],
+        [
+          3512.6,
+          214.8,
+          3559.4,
+          314.0
+        ],
+        [
+          3507.1,
+          214.4,
+          3558.4,
+          322.9
+        ],
+        [
+          3507.2,
+          214.8,
+          3558.4,
+          323.2
+        ]
+      ]
+    },
+    "12": {
+      "category": "car",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          2003.2,
+          327.2,
+          2086.4,
+          403.2
+        ],
+        [
+          2002.9,
+          326.6,
+          2086.7,
+          403.2
+        ],
+        [
+          2004.4,
+          328.4,
+          2085.2,
+          402.0
+        ],
+        [
+          2004.4,
+          329.2,
+          2085.2,
+          402.8
+        ],
+        [
+          2003.9,
+          328.4,
+          2085.7,
+          403.6
+        ],
+        [
+          2004.2,
+          329.2,
+          2085.4,
+          403.6
+        ],
+        [
+          2004.4,
+          329.4,
+          2085.2,
+          403.2
+        ],
+        [
+          2003.5,
+          327.8,
+          2086.1,
+          403.2
+        ],
+        [
+          2003.5,
+          328.4,
+          2086.1,
+          403.6
+        ],
+        [
+          2003.5,
+          328.4,
+          2086.1,
+          403.6
+        ],
+        [
+          2004.3,
+          329.0,
+          2085.3,
+          402.4
+        ],
+        [
+          2004.0,
+          329.2,
+          2085.6,
+          402.8
+        ],
+        [
+          2004.8,
+          330.0,
+          2084.8,
+          402.0
+        ],
+        [
+          2004.3,
+          329.2,
+          2085.3,
+          402.0
+        ],
+        [
+          2001.6,
+          328.2,
+          2084.8,
+          403.2
+        ],
+        [
+          2000.5,
+          327.2,
+          2085.9,
+          404.8
+        ]
+      ]
+    },
+    "13": {
+      "category": "traffic_light",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622
+      ],
+      "bbox_sequence": [
+        [
+          3686.4,
+          238.0,
+          3744.0,
+          377.6
+        ],
+        [
+          3686.2,
+          239.2,
+          3744.2,
+          380.0
+        ],
+        [
+          3687.3,
+          238.0,
+          3749.6,
+          388.5
+        ],
+        [
+          3685.8,
+          238.8,
+          3744.6,
+          381.3
+        ],
+        [
+          3688.3,
+          239.2,
+          3748.5,
+          384.0
+        ]
+      ]
+    },
+    "14": {
+      "category": "truck",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717,
+        7.622,
+        9.528,
+        11.433,
+        13.339,
+        15.244,
+        17.15,
+        19.056,
+        20.961,
+        22.867,
+        24.772,
+        26.678,
+        28.583
+      ],
+      "bbox_sequence": [
+        [
+          3020.8,
+          503.6,
+          3174.4,
+          657.2
+        ],
+        [
+          3025.1,
+          502.4,
+          3176.5,
+          653.6
+        ],
+        [
+          3021.4,
+          505.6,
+          3173.8,
+          657.6
+        ],
+        [
+          3021.0,
+          505.6,
+          3174.2,
+          658.4
+        ],
+        [
+          3023.8,
+          504.8,
+          3177.8,
+          658.4
+        ],
+        [
+          3021.8,
+          505.6,
+          3173.4,
+          656.8
+        ],
+        [
+          3022.8,
+          505.6,
+          3172.4,
+          654.4
+        ],
+        [
+          3022.1,
+          505.6,
+          3173.1,
+          656.0
+        ],
+        [
+          3022.2,
+          505.6,
+          3173.0,
+          656.0
+        ],
+        [
+          3022.4,
+          505.6,
+          3172.8,
+          656.0
+        ],
+        [
+          3022.8,
+          506.4,
+          3172.4,
+          656.0
+        ],
+        [
+          3026.2,
+          506.4,
+          3175.4,
+          656.0
+        ],
+        [
+          3021.2,
+          504.0,
+          3174.0,
+          657.6
+        ],
+        [
+          3021.7,
+          504.0,
+          3173.5,
+          657.6
+        ],
+        [
+          3022.8,
+          506.4,
+          3172.4,
+          658.4
+        ],
+        [
+          3023.5,
+          506.4,
+          3171.7,
+          657.6
+        ]
+      ]
+    },
+    "15": {
+      "category": "person",
+      "frame_timestamps": [
+        0.0,
+        1.906
+      ],
+      "bbox_sequence": [
+        [
+          3564.8,
+          1171.2,
+          3590.4,
+          1235.2
+        ],
+        [
+          3567.4,
+          1169.6,
+          3594.2,
+          1236.8
+        ]
+      ]
+    },
+    "16": {
+      "category": "person",
+      "frame_timestamps": [
+        0.0,
+        1.906,
+        3.811,
+        5.717
+      ],
+      "bbox_sequence": [
+        [
+          3635.2,
+          1147.2,
+          3660.8,
+          1201.6
+        ],
+        [
+          3635.2,
+          1147.2,
+          3660.8,
+          1201.6
+        ],
+        [
+          3635.2,
+          1145.6,
+          3660.8,
+          1200.0
+        ],
+        [
+          3635.5,
+          1145.6,
+          3660.5,
+          1198.4
+        ]
+      ]
+    },
+    "17": {
+      "category": "traffic_light",
+      "frame_timestamps": [
+        0.0
+      ],
+      "bbox_sequence": [
+        [
+          1756.8,
+          79.3,
+          1788.8,
+          115.9
+        ]
+      ]
+    }
+  },
+  "escalation_reason": "conflict: risk=1.00>=0.6",
+  "s1_verdict": "NO",
+  "s2_verdict": "YES",
+  "final_verdict": "YES",
+  "clip_score": 0.6476296261284086,
+  "clip_start_time": 0.0,
+  "clip_end_time": 28.583333333333332,
+  "video_path": "outputs/ablation_v2_C0_32b_instruct/data/camera-1/20260213/raw_suspect_clips/clip-fe448cc8.mp4"
+}

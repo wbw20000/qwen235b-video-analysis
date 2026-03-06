@@ -1,0 +1,68 @@
+# Accident Clipper - 事故视频剪辑服务
+# 监控分析结果，检测到事故时剪辑视频片段并生成报告
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accident-clipper
+  namespace: traffic-vlm
+  labels:
+    app: accident-clipper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accident-clipper
+  template:
+    metadata:
+      labels:
+        app: accident-clipper
+    spec:
+      containers:
+      - name: clipper
+        image: localhost:5000/semantic-analyzer:v8
+        imagePullPolicy: Always
+        command: ["python", "workers/accident_clipper.py", "--watch"]
+        env:
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: ACCIDENTS_DIR
+          value: "/data1/accidents"
+        - name: RECORDINGS_DIR
+          value: "/data1/videos/rtsp_recordings"
+        - name: PRE_ACCIDENT_SECONDS
+          value: "30"
+        - name: POST_ACCIDENT_SECONDS
+          value: "30"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+          readOnly: true
+        - name: accidents
+          mountPath: /data1/accidents
+      volumes:
+      - name: videos
+        hostPath:
+          path: /data1/videos
+          type: Directory
+      - name: results
+        hostPath:
+          path: /data1/results
+          type: Directory
+      - name: accidents
+        hostPath:
+          path: /data1/accidents
+          type: DirectoryOrCreate

@@ -326,567 +326,720 @@ class TrafficVLMPipeline:
         base_date = datetime.now()
         output_paths = build_output_paths(self.config.datastore.base_dir, camera_id, date_str)
 
-        # P0: 使用自动降分辨率重试机制
-        manager, retry_metadata = create_video_stream_with_retry(
-            video_path, self.config.stream, camera_id=camera_id
-        )
 
-        # 处理创建失败的情况
-        if manager is None:
-            error_msg = retry_metadata.get('error', 'Unknown error')
-            _safe_print(f"[pipeline] ✗ 视频处理失败: {error_msg}", flush=True)
-            return {
-                "error": "视频处理失败",
-                "error_detail": error_msg,
-                "retry_metadata": retry_metadata,
-                "keyframes": [],
-                "clips": [],
-                "results": [],
-                "skipped_clips": [],
-                "vlm_stats": {"total_clips": 0, "analyzed_clips": 0, "skipped_clips": 0},
-                "templates": [],
-            }
+        # === 预处理缓存复用 ===
+        video_name = os.path.basename(video_path)
+        _preprocess_cache = None
+        reuse_dir = self.config.vlm.reuse_preprocess_dir
+        if reuse_dir:
+            _cache_path = os.path.join(reuse_dir, "preprocess_cache", f"{video_name}.json.gz")
+            if os.path.exists(_cache_path):
+                with gzip.open(_cache_path, 'rt', encoding='utf-8') as _cf:
+                    _preprocess_cache = json.load(_cf)
+                print(f"[pipeline] ✓ 从缓存加载预处理: {len(_preprocess_cache['preprocessed_clips'])} clips")
 
-        # 记录重试信息
-        if retry_metadata.get('retry'):
-            _safe_print(f"[pipeline] ⚠ 使用降分辨率模式处理 (scale={retry_metadata['scale_used']})", flush=True)
+        if _preprocess_cache is not None:
+            # 使用缓存的预处理数据，跳过 Stage A
+            preprocessed_clips = _preprocess_cache["preprocessed_clips"]
+            skipped_clips = _preprocess_cache.get("skipped_clips", [])
 
-        motion_detector = MotionDetector(self.config.stream)
+            # 消融 skip_metadata：缓存中可能含 metadata_text，需清空
+            if not self.config.progressive_vlm.include_object_metadata_text:
+                for _p in preprocessed_clips:
+                    _p["metadata_text_fast"] = ""
+                    _p["metadata_text_escalated"] = ""
+                print("[pipeline] [skip-metadata] 已清空缓存中的 metadata_text")
 
-        self._progress(5, "启动低分辨率运动检测...")
-        triggers = []
-        for idx, ts, frame in manager.iterate_lowres():
-            trig = motion_detector.step(frame, ts)
-            triggers.extend(trig)
-        self._progress(15, f"运动触发完成，触发数: {len(triggers)}")
-
-        # 抓取高清关键帧
-        keyframes = extract_keyframes(
-            manager=manager,
-            triggers=triggers,
-            save_dir=output_paths["keyframes"],
-            stream_config=self.config.stream,
-            camera_id=camera_id,
-            base_date=base_date,
-        )
-        self._progress(25, f"抓取高清关键帧完成，共 {len(keyframes)} 张")
-
-        # 模板扩展 - 根据模式选择不同策略
-        if mode == "accident":
-            # 事故检索模式：使用专用的事故模板扩展
-            templates, violation_types = expand_accident_templates(user_query, self.config.templates)
-            accident_query = True  # 强制启用事故检测逻辑
-            self._progress(30, f"[事故检索模式] 扩展模板 {len(templates)} 条，事故类型 {violation_types}")
+            final_results = []
+            vlm_client = VLMClient(self.config.vlm)
+            accident_query = (mode == "accident")
+            retry_metadata = {}
+            suspect_clips = [p["clip"] for p in preprocessed_clips]
+            keyframes = []
+            templates = []
+            violation_types = []
+            candidates = []
+            clips = suspect_clips
+            manager = None
         else:
-            # 违法检测模式：使用原有逻辑
-            templates, violation_types = expand_templates(user_query, self.config.templates)
-            accident_query = self._is_accident_query(violation_types)
-            self._progress(30, f"扩展模板 {len(templates)} 条，违规类型 {violation_types}")
-        accident_templates: List[str] = []
-        if accident_query:
-            for v in violation_types:
-                if v in self.accident_types:
-                    accident_templates.extend(self.config.templates.builtin_templates.get(v, []))
-            accident_templates = list(dict.fromkeys(accident_templates))
 
-        # 向量编码与检索（使用内存图像，避免重复磁盘I/O）
-        indexer = EmbeddingIndexer(self.config.embedding)
-        records = [
-            {
-                "image_path": k["path"],
-                "image": k.get("image"),  # 内存图像（来自extract_keyframes）
-                "metadata": {
-                    "camera_id": k["camera_id"],
-                    "timestamp": k["timestamp"],
-                    "frame_idx": k["frame_idx"],
-                    "image_path": k["path"],
-                    "trigger_score": k["trigger_score"],
-                    "trigger_type": k["trigger_type"],
-                },
-            }
-            for k in keyframes
-        ]
-        indexer.add_frame_embeddings(records)
+            # P0: 使用自动降分辨率重试机制
+            manager, retry_metadata = create_video_stream_with_retry(
+                video_path, self.config.stream, camera_id=camera_id
+            )
 
-        # 编码完成后释放内存图像（避免内存占用）
-        for k in keyframes:
-            if "image" in k:
-                del k["image"]
-        candidates = indexer.multi_template_search(templates)
+            # 处理创建失败的情况
+            if manager is None:
+                error_msg = retry_metadata.get('error', 'Unknown error')
+                _safe_print(f"[pipeline] ✗ 视频处理失败: {error_msg}", flush=True)
+                return {
+                    "error": "视频处理失败",
+                    "error_detail": error_msg,
+                    "retry_metadata": retry_metadata,
+                    "keyframes": [],
+                    "clips": [],
+                    "results": [],
+                    "skipped_clips": [],
+                    "vlm_stats": {"total_clips": 0, "analyzed_clips": 0, "skipped_clips": 0},
+                    "templates": [],
+                }
 
-        # 事故模板加权召回：额外跑一轮事故模板，合并去重
-        if accident_query and accident_templates:
-            accident_candidates_raw = indexer.multi_template_search(accident_templates)
+            # 记录重试信息
+            if retry_metadata.get('retry'):
+                _safe_print(f"[pipeline] ⚠ 使用降分辨率模式处理 (scale={retry_metadata['scale_used']})", flush=True)
 
-            def _mark_accident_candidate(c: Dict) -> Dict:
-                meta = dict(c.get("metadata", {}))
-                meta["accident_template_hit"] = True
-                meta["accident_template_score"] = c.get("similarity_score", 0.0)
-                new_c = dict(c)
-                new_c["metadata"] = meta
-                return new_c
-
-            accident_candidates = [_mark_accident_candidate(c) for c in accident_candidates_raw]
-            merged: Dict[str, Dict] = {}
-            for item in candidates:
-                path = item.get("metadata", {}).get("image_path") or item.get("frame_id")
-                if path is not None:
-                    merged[str(path)] = item
-            for item in accident_candidates:
-                path = item.get("metadata", {}).get("image_path") or item.get("frame_id")
-                if path is None:
-                    continue
-                key = str(path)
-                if key in merged:
-                    # 保留相似度更高的，同时带上事故标记
-                    if item["similarity_score"] > merged[key]["similarity_score"]:
-                        merged[key] = item
-                    else:
-                        meta = dict(merged[key].get("metadata", {}))
-                        meta["accident_template_hit"] = True
-                        meta["accident_template_score"] = max(
-                            float(meta.get("accident_template_score", 0.0) or 0.0),
-                            item.get("similarity_score", 0.0),
-                        )
-                        merged[key]["metadata"] = meta
+            # 消融测试：跳过MOG2运动检测，均匀采样关键帧
+            if self.config.stream.ablation_skip_mog2:
+                import numpy as np
+                n_uniform = self.config.embedding.frame_top_n  # 默认80
+                duration = manager.duration
+                if duration > 0 and n_uniform > 0:
+                    uniform_ts = np.linspace(0, duration - 0.1, num=n_uniform)
+                    triggers = [{"timestamp": float(t), "score": 0.0, "type": "uniform_ablation"} for t in uniform_ts]
                 else:
-                    merged[key] = item
-            candidates = sorted(merged.values(), key=lambda x: x["similarity_score"], reverse=True)
-            candidates = candidates[: self.config.embedding.frame_top_n]
+                    triggers = []
+                self._progress(15, f"[消融-NoMOG2] 跳过运动检测，均匀采样 {len(triggers)} 个时间点")
+            else:
+                motion_detector = MotionDetector(self.config.stream)
 
-        self._progress(45, f"帧级检索完成，候选帧 {len(candidates)}")
+                self._progress(5, "启动低分辨率运动检测...")
+                triggers = []
+                for idx, ts, frame in manager.iterate_lowres():
+                    trig = motion_detector.step(frame, ts)
+                    triggers.extend(trig)
+                self._progress(15, f"运动触发完成，触发数: {len(triggers)}")
 
-        # 轨迹碰撞评分（仅事故模式且启用时）
-        if self.config.trajectory_score.enabled and accident_query and candidates:
-            self._compute_trajectory_scores_for_candidates(candidates, accident_query)
-            self._progress(47, f"轨迹评分完成")
+            # 抓取高清关键帧
+            keyframes = extract_keyframes(
+                manager=manager,
+                triggers=triggers,
+                save_dir=output_paths["keyframes"],
+                stream_config=self.config.stream,
+                camera_id=camera_id,
+                base_date=base_date,
+            )
+            self._progress(25, f"抓取高清关键帧完成，共 {len(keyframes)} 张")
 
-        # 时间聚类 -> clip（事故模式下启用coverage评分）
-        coverage_config = self.config.coverage if accident_query else None
-        clips = cluster_frames_to_clips(
-            candidates,
-            self.config.cluster,
-            accident_mode=accident_query,
-            coverage_config=coverage_config,
-        )
-        self._progress(55, f"时间聚类完成，候选 clip {len(clips)}")
+            # 模板扩展 - 根据模式选择不同策略
+            if mode == "accident":
+                # 事故检索模式：使用专用的事故模板扩展
+                templates, violation_types = expand_accident_templates(user_query, self.config.templates)
+                accident_query = True  # 强制启用事故检测逻辑
+                self._progress(30, f"[事故检索模式] 扩展模板 {len(templates)} 条，事故类型 {violation_types}")
+            else:
+                # 违法检测模式：使用原有逻辑
+                templates, violation_types = expand_templates(user_query, self.config.templates)
+                accident_query = self._is_accident_query(violation_types)
+                self._progress(30, f"扩展模板 {len(templates)} 条，违规类型 {violation_types}")
+            accident_templates: List[str] = []
+            if accident_query:
+                for v in violation_types:
+                    if v in self.accident_types:
+                        accident_templates.extend(self.config.templates.builtin_templates.get(v, []))
+                accident_templates = list(dict.fromkeys(accident_templates))
 
-        # 剪辑并采样 - 使用多进程并行剪辑
-        print(f"\n[pipeline] 开始并行剪辑 {len(clips)} 个 clips...")
+            # 消融测试：跳过SigLIP，直接用MOG2关键帧作为candidates
+            if self.config.embedding.ablation_skip_siglip:
+                sorted_kf = sorted(keyframes, key=lambda k: k["trigger_score"], reverse=True)
+                sorted_kf = sorted_kf[: self.config.embedding.frame_top_n]
+                candidates = []
+                for i, k in enumerate(sorted_kf):
+                    candidates.append({
+                        "frame_id": i,
+                        "similarity_score": 1.0,
+                        "metadata": {
+                            "camera_id": k["camera_id"],
+                            "timestamp": k["timestamp"],
+                            "frame_idx": k["frame_idx"],
+                            "image_path": k["path"],
+                            "trigger_score": k["trigger_score"],
+                            "trigger_type": k["trigger_type"],
+                            "accident_template_hit": True,
+                            "accident_template_score": 1.0,
+                        },
+                    })
+                for k in keyframes:
+                    if "image" in k:
+                        del k["image"]
+                self._progress(45, f"[消融-NoSigLIP] 跳过SigLIP，直接使用 {len(candidates)} 个MOG2关键帧")
+            else:
+                # 向量编码与检索（使用内存图像，避免重复磁盘I/O）
+                indexer = EmbeddingIndexer(self.config.embedding)
+                records = [
+                    {
+                        "image_path": k["path"],
+                        "image": k.get("image"),  # 内存图像（来自extract_keyframes）
+                        "metadata": {
+                            "camera_id": k["camera_id"],
+                            "timestamp": k["timestamp"],
+                            "frame_idx": k["frame_idx"],
+                            "image_path": k["path"],
+                            "trigger_score": k["trigger_score"],
+                            "trigger_type": k["trigger_type"],
+                        },
+                    }
+                    for k in keyframes
+                ]
+                indexer.add_frame_embeddings(records)
 
-        # 并行剪辑主clips
-        suspect_clips, clip_success_count, clip_fail_count = parallel_cut_clips(
-            clips=clips,
-            video_path=video_path,
-            output_dir=output_paths["raw_suspect_clips"],
-            max_workers=4
-        )
+                # 编码完成后释放内存图像（避免内存占用）
+                for k in keyframes:
+                    if "image" in k:
+                        del k["image"]
+                candidates = indexer.multi_template_search(templates)
 
-        # 并行剪辑 long_version（事故clips的扩展版本）
-        long_clips_to_cut = []
-        for clip in suspect_clips:
-            long_ver = clip.get("long_version")
-            if clip.get("is_accident") and long_ver:
-                long_clips_to_cut.append({
-                    "clip_id": f"{clip['clip_id']}_long",
-                    "start_time": long_ver["start_time"],
-                    "end_time": long_ver["end_time"],
-                    "parent_clip_id": clip["clip_id"],  # 记录父clip
-                })
+                # 事故模板加权召回：额外跑一轮事故模板，合并去重
+                if accident_query and accident_templates:
+                    accident_candidates_raw = indexer.multi_template_search(accident_templates)
 
-        if long_clips_to_cut:
-            print(f"[pipeline] 并行剪辑 {len(long_clips_to_cut)} 个 long_version clips...")
-            long_results, long_success, long_fail = parallel_cut_clips(
-                clips=long_clips_to_cut,
+                    def _mark_accident_candidate(c: Dict) -> Dict:
+                        meta = dict(c.get("metadata", {}))
+                        meta["accident_template_hit"] = True
+                        meta["accident_template_score"] = c.get("similarity_score", 0.0)
+                        new_c = dict(c)
+                        new_c["metadata"] = meta
+                        return new_c
+
+                    accident_candidates = [_mark_accident_candidate(c) for c in accident_candidates_raw]
+                    merged: Dict[str, Dict] = {}
+                    for item in candidates:
+                        path = item.get("metadata", {}).get("image_path") or item.get("frame_id")
+                        if path is not None:
+                            merged[str(path)] = item
+                    for item in accident_candidates:
+                        path = item.get("metadata", {}).get("image_path") or item.get("frame_id")
+                        if path is None:
+                            continue
+                        key = str(path)
+                        if key in merged:
+                            # 保留相似度更高的，同时带上事故标记
+                            if item["similarity_score"] > merged[key]["similarity_score"]:
+                                merged[key] = item
+                            else:
+                                meta = dict(merged[key].get("metadata", {}))
+                                meta["accident_template_hit"] = True
+                                meta["accident_template_score"] = max(
+                                    float(meta.get("accident_template_score", 0.0) or 0.0),
+                                    item.get("similarity_score", 0.0),
+                                )
+                                merged[key]["metadata"] = meta
+                        else:
+                            merged[key] = item
+                    candidates = sorted(merged.values(), key=lambda x: x["similarity_score"], reverse=True)
+                    candidates = candidates[: self.config.embedding.frame_top_n]
+
+                self._progress(45, f"帧级检索完成，候选帧 {len(candidates)}")
+
+            # 轨迹碰撞评分（仅事故模式且启用时）
+            if self.config.trajectory_score.enabled and accident_query and candidates:
+                self._compute_trajectory_scores_for_candidates(candidates, accident_query)
+                self._progress(47, f"轨迹评分完成")
+
+            # 时间聚类 -> clip（事故模式下启用coverage评分）
+            coverage_config = self.config.coverage if accident_query else None
+            clips = cluster_frames_to_clips(
+                candidates,
+                self.config.cluster,
+                accident_mode=accident_query,
+                coverage_config=coverage_config,
+            )
+            self._progress(55, f"时间聚类完成，候选 clip {len(clips)}")
+
+            # 剪辑并采样 - 使用多进程并行剪辑
+            print(f"\n[pipeline] 开始并行剪辑 {len(clips)} 个 clips...")
+
+            # 并行剪辑主clips
+            suspect_clips, clip_success_count, clip_fail_count = parallel_cut_clips(
+                clips=clips,
                 video_path=video_path,
                 output_dir=output_paths["raw_suspect_clips"],
                 max_workers=4
             )
 
-            # 将long_version结果关联回原clip
-            long_result_map = {r["clip_id"].replace("_long", ""): r for r in long_results}
+            # 并行剪辑 long_version（事故clips的扩展版本）
+            long_clips_to_cut = []
             for clip in suspect_clips:
-                if clip["clip_id"] in long_result_map:
-                    long_r = long_result_map[clip["clip_id"]]
-                    clip["long_video_path"] = long_r.get("video_path", video_path)
-                    clip["long_clip_source"] = long_r.get("clip_source", "original_fallback")
+                long_ver = clip.get("long_version")
+                if clip.get("is_accident") and long_ver:
+                    long_clips_to_cut.append({
+                        "clip_id": f"{clip['clip_id']}_long",
+                        "start_time": long_ver["start_time"],
+                        "end_time": long_ver["end_time"],
+                        "parent_clip_id": clip["clip_id"],  # 记录父clip
+                    })
 
-            clip_success_count += long_success
-            clip_fail_count += long_fail
-
-        print(f"\n[pipeline] 剪辑统计: 成功 {clip_success_count} 段, 失败 {clip_fail_count} 段")
-        self._progress(65, f"剪辑完成 {clip_success_count}/{len(suspect_clips)} 段")
-
-        # 本地检测/跟踪 + 采样帧（使用GPU服务单例，避免重复加载模型）
-        gpu_service = get_gpu_service(self.config)
-        vlm_client = VLMClient(self.config.vlm)
-
-        final_results = []
-        skipped_clips = []  # 记录因阈值过滤跳过的clip
-
-        # ============ 阶段A：预处理所有clips（串行，使用GPU） ============
-        preprocessed_clips = []
-        clips_to_process = suspect_clips[: self.config.vlm.top_clips]
-        total_clips = len(clips_to_process)
-
-        print(f"\n[pipeline] ========== 阶段A：预处理 {total_clips} 个clips ==========")
-
-        for idx, clip in enumerate(clips_to_process):
-            # P0优化：clip_score阈值过滤
-            clip_score = clip.get("clip_score", 0.0)
-            threshold = self.config.vlm.clip_score_threshold
-
-            if self.config.vlm.skip_low_score_vlm and clip_score < threshold:
-                print(f"[pipeline] ⏭️ 跳过 clip {clip['clip_id']}: clip_score={clip_score:.3f} < 阈值{threshold}")
-                skipped_clips.append({
-                    "clip": clip,
-                    "reason": f"clip_score={clip_score:.3f} < {threshold}",
-                    "skipped": True
-                })
-                continue
-
-            # [C修复] 包裹预处理在try-except中，异常降级为UNCERTAIN
-            engine_error = None
-            try:
-                # 根据clip来源决定采样时间范围
-                if clip.get("clip_source") == "clipped":
-                    # 剪辑成功：使用相对时间（0到duration）
-                    sample_start = 0.0
-                    sample_end = clip["end_time"] - clip["start_time"]
-                else:
-                    # 使用原始视频：使用绝对时间
-                    sample_start = clip["start_time"]
-                    sample_end = clip["end_time"]
-
-                # 根据模式选择采样帧数：事故模式使用更密集的采样
-                clip_duration = clip["end_time"] - clip["start_time"]
-
-                if mode == "accident":
-                    # 渐进式VLM v2: 根据clip时长自适应帧预算
-                    progressive_config = self.config.progressive_vlm
-                    if progressive_config.enabled and progressive_config.version == "v2":
-                        # v2策略：短clip需要更多帧
-                        v2_frames = progressive_config.get_s1_frames(clip_duration)
-                        # 为了确保v2有足够帧可选，采样帧数取max(v2帧数, 配置帧数)
-                        sampling_frames = max(v2_frames, self.config.cluster.accident_clip_sampling_frames)
-                        # 额外安全边际：至少要有足够的帧给v2选择
-                        sampling_frames = max(sampling_frames, 16)
-                        print(f"[pipeline] v2自适应采样: clip_duration={clip_duration:.1f}s → sampling_frames={sampling_frames}")
-                    else:
-                        sampling_frames = self.config.cluster.accident_clip_sampling_frames
-                else:
-                    sampling_frames = self.config.cluster.clip_sampling_frames
-
-                frames = sample_frames_from_clip(
-                    clip["video_path"],
-                    sample_start,
-                    sample_end,
-                    sampling_frames,
+            if long_clips_to_cut:
+                print(f"[pipeline] 并行剪辑 {len(long_clips_to_cut)} 个 long_version clips...")
+                long_results, long_success, long_fail = parallel_cut_clips(
+                    clips=long_clips_to_cut,
+                    video_path=video_path,
+                    output_dir=output_paths["raw_suspect_clips"],
+                    max_workers=4
                 )
-                det_result = gpu_service.run_yolo(frames)
 
-                # 渐进式VLM策略：保存原始帧（无YOLO叠加）
-                progressive_config = self.config.progressive_vlm
-                raw_frames_dir = os.path.join(output_paths["annotated_frames"], "raw")
-                raw_images = []
-                if progressive_config.enabled and mode == "accident":
-                    # 保存原始帧用于渐进式VLM
-                    raw_saved = save_raw_frames(
+                # 将long_version结果关联回原clip
+                long_result_map = {r["clip_id"].replace("_long", ""): r for r in long_results}
+                for clip in suspect_clips:
+                    if clip["clip_id"] in long_result_map:
+                        long_r = long_result_map[clip["clip_id"]]
+                        clip["long_video_path"] = long_r.get("video_path", video_path)
+                        clip["long_clip_source"] = long_r.get("clip_source", "original_fallback")
+
+                clip_success_count += long_success
+                clip_fail_count += long_fail
+
+            print(f"\n[pipeline] 剪辑统计: 成功 {clip_success_count} 段, 失败 {clip_fail_count} 段")
+            self._progress(65, f"剪辑完成 {clip_success_count}/{len(suspect_clips)} 段")
+
+            # 本地检测/跟踪 + 采样帧（使用GPU服务单例，避免重复加载模型）
+            gpu_service = get_gpu_service(self.config)
+            vlm_client = VLMClient(self.config.vlm)
+
+            final_results = []
+            skipped_clips = []  # 记录因阈值过滤跳过的clip
+
+            # ============ 阶段A：预处理所有clips（串行，使用GPU） ============
+            preprocessed_clips = []
+            clips_to_process = suspect_clips[: self.config.vlm.top_clips]
+            total_clips = len(clips_to_process)
+
+            print(f"\n[pipeline] ========== 阶段A：预处理 {total_clips} 个clips ==========")
+
+            for idx, clip in enumerate(clips_to_process):
+                # P0优化：clip_score阈值过滤
+                clip_score = clip.get("clip_score", 0.0)
+                threshold = self.config.vlm.clip_score_threshold
+
+                if self.config.vlm.skip_low_score_vlm and clip_score < threshold:
+                    print(f"[pipeline] ⏭️ 跳过 clip {clip['clip_id']}: clip_score={clip_score:.3f} < 阈值{threshold}")
+                    skipped_clips.append({
+                        "clip": clip,
+                        "reason": f"clip_score={clip_score:.3f} < {threshold}",
+                        "skipped": True
+                    })
+                    continue
+
+                # [C修复] 包裹预处理在try-except中，异常降级为UNCERTAIN
+                engine_error = None
+                try:
+                    # 根据clip来源决定采样时间范围
+                    if clip.get("clip_source") == "clipped":
+                        # 剪辑成功：使用相对时间（0到duration）
+                        sample_start = 0.0
+                        sample_end = clip["end_time"] - clip["start_time"]
+                    else:
+                        # 使用原始视频：使用绝对时间
+                        sample_start = clip["start_time"]
+                        sample_end = clip["end_time"]
+
+                    # 根据模式选择采样帧数：事故模式使用更密集的采样
+                    clip_duration = clip["end_time"] - clip["start_time"]
+
+                    if mode == "accident":
+                        # 渐进式VLM v2: 根据clip时长自适应帧预算
+                        progressive_config = self.config.progressive_vlm
+                        if progressive_config.enabled and progressive_config.version == "v2":
+                            # v2策略：短clip需要更多帧
+                            v2_frames = progressive_config.get_s1_frames(clip_duration)
+                            # 为了确保v2有足够帧可选，采样帧数取max(v2帧数, 配置帧数)
+                            sampling_frames = max(v2_frames, self.config.cluster.accident_clip_sampling_frames)
+                            # 额外安全边际：至少要有足够的帧给v2选择
+                            sampling_frames = max(sampling_frames, 16)
+                            print(f"[pipeline] v2自适应采样: clip_duration={clip_duration:.1f}s → sampling_frames={sampling_frames}")
+                        else:
+                            sampling_frames = self.config.cluster.accident_clip_sampling_frames
+                    else:
+                        sampling_frames = self.config.cluster.clip_sampling_frames
+
+                    frames = sample_frames_from_clip(
+                        clip["video_path"],
+                        sample_start,
+                        sample_end,
+                        sampling_frames,
+                    )
+
+                    # YOLO 检测（消融 disable_yolo 时返回空结果）
+                    if self.config.detector.enabled:
+                        det_result = gpu_service.run_yolo(frames)
+                    else:
+                        _safe_print("[pipeline] [消融-NoYOLO] 跳过YOLO检测，使用空检测结果", flush=True)
+                        det_result = {
+                            "frame_results": [{"boxes": [], "labels": [], "scores": [], "track_ids": []} for _ in frames],
+                            "tracks": {},
+                        }
+
+                    # 渐进式VLM策略：保存原始帧（无YOLO叠加）
+                    progressive_config = self.config.progressive_vlm
+                    raw_frames_dir = os.path.join(output_paths["annotated_frames"], "raw")
+                    raw_images = []
+                    if progressive_config.enabled and mode == "accident":
+                        # 保存原始帧用于渐进式VLM
+                        raw_saved = save_raw_frames(
+                            frames,
+                            save_dir=raw_frames_dir,
+                            camera_id=camera_id,
+                            date_str=date_str,
+                            clip_id=clip["clip_id"],
+                        )
+                        raw_images = [r["path"] for r in raw_saved]
+
+                    annotated = annotate_frames(
                         frames,
-                        save_dir=raw_frames_dir,
+                        det_result.get("frame_results", []),
+                        save_dir=output_paths["annotated_frames"],
                         camera_id=camera_id,
                         date_str=date_str,
-                        clip_id=clip["clip_id"],
+                        roi_polygon=self.config.stream.roi_polygon,
+                        clip_id=clip["clip_id"],  # 传入clip_id避免文件名冲突
                     )
-                    raw_images = [r["path"] for r in raw_saved]
+                    traffic_lights = self.light_detector.detect()
+                    tracks_text = self._tracks_to_text(det_result.get("tracks", {}))
+                    traffic_light_text = self._traffic_light_to_text(traffic_lights)
 
-                annotated = annotate_frames(
-                    frames,
-                    det_result.get("frame_results", []),
-                    save_dir=output_paths["annotated_frames"],
-                    camera_id=camera_id,
-                    date_str=date_str,
-                    roi_polygon=self.config.stream.roi_polygon,
-                    clip_id=clip["clip_id"],  # 传入clip_id避免文件名冲突
-                )
-                traffic_lights = self.light_detector.detect()
-                tracks_text = self._tracks_to_text(det_result.get("tracks", {}))
-                traffic_light_text = self._traffic_light_to_text(traffic_lights)
+                    # 渐进式VLM：使用关键帧选择器选帧并构建元数据包
+                    metadata_text_fast = ""
+                    metadata_text_escalated = ""
+                    selected_frames_fast = []
+                    selected_frames_escalated = []
+                    max_signal_score = 0.0  # v2升级规则使用
 
-                # 渐进式VLM：使用关键帧选择器选帧并构建元数据包
-                metadata_text_fast = ""
-                metadata_text_escalated = ""
-                selected_frames_fast = []
-                selected_frames_escalated = []
-                max_signal_score = 0.0  # v2升级规则使用
+                    if progressive_config.enabled and mode == "accident":
+                        # 消融测试：强制均匀帧选择（替代信号驱动选帧）
+                        if progressive_config.ablation_force_uniform_frames:
+                            import numpy as np
+                            clip_duration = clip["end_time"] - clip["start_time"]
+                            total_sampled = len(frames)
 
-                if progressive_config.enabled and mode == "accident":
-                    keyframe_selector = KeyframeSelector(progressive_config)
-                    frame_results = det_result.get("frame_results", [])
-                    tracks = det_result.get("tracks", {})
-                    fps = 30.0  # 默认帧率
+                            # S1 均匀选帧
+                            s1_count = min(progressive_config.get_s1_frames(clip_duration), total_sampled)
+                            s1_indices = np.linspace(0, total_sampled - 1, num=s1_count, dtype=int)
+                            selected_frames_fast = [
+                                {"frame_idx": int(idx), "timestamp": frames[idx][0] - sample_start,
+                                 "reasons": ["uniform_ablation"], "score": 0.0}
+                                for idx in s1_indices
+                            ]
 
-                    # [A1修复] 从frames中提取实际时间戳（相对于clip起点）
-                    # frames是[(ts, frame), ...]，ts是绝对时间，需转为clip内相对时间
-                    frame_timestamps = [ts - sample_start for ts, frame in frames] if frames else None
+                            # S2 均匀选帧
+                            s2_count = min(progressive_config.get_s2_frames(clip_duration), total_sampled)
+                            s2_indices = np.linspace(0, total_sampled - 1, num=s2_count, dtype=int)
+                            selected_frames_escalated = [
+                                {"frame_idx": int(idx), "timestamp": frames[idx][0] - sample_start,
+                                 "reasons": ["uniform_ablation"], "score": 0.0}
+                                for idx in s2_indices
+                            ]
 
-                    # S1: FAST模式帧选择
-                    selected_fast = keyframe_selector.select_frames_for_clip(
-                        frame_results=frame_results,
-                        tracks=tracks,
-                        clip_start_time=clip["start_time"],
-                        clip_duration=clip["end_time"] - clip["start_time"],
-                        fps=fps,
-                        mode="FAST",
-                        frame_timestamps=frame_timestamps,  # [A1修复] 传入实际时间戳
-                    )
-                    selected_frames_fast = [
-                        {"frame_idx": r.frame_idx, "timestamp": r.timestamp, "reasons": r.reason_tags,
-                         "score": r.score_components.get("combined", 0)}
-                        for r in selected_fast
-                    ]
+                            max_signal_score = 0.0
 
-                    # 计算max_signal_score（用于v2升级规则）
-                    max_signal_score = max((r.score_components.get("combined", 0) for r in selected_fast), default=0)
+                            # 均匀选帧模式下无 FrameRequest，传空列表
+                            # 如果 include_object_metadata_text=False（消融 skip_metadata），
+                            # build_metadata_pack 会直接返回 ""
+                            frame_results = det_result.get("frame_results", [])
+                            tracks = det_result.get("tracks", {})
+                            metadata_text_fast = build_metadata_pack(
+                                [], frame_results, tracks, progressive_config
+                            )
+                            metadata_text_escalated = metadata_text_fast
 
-                    # S2: ESCALATED模式帧选择
-                    selected_escalated = keyframe_selector.select_frames_for_clip(
-                        frame_results=frame_results,
-                        tracks=tracks,
-                        clip_start_time=clip["start_time"],
-                        clip_duration=clip["end_time"] - clip["start_time"],
-                        fps=fps,
-                        mode="ESCALATED",
-                        frame_timestamps=frame_timestamps,  # [A1修复] 传入实际时间戳
-                    )
-                    selected_frames_escalated = [
-                        {"frame_idx": r.frame_idx, "timestamp": r.timestamp, "reasons": r.reason_tags,
-                         "score": r.score_components.get("combined", 0)}
-                        for r in selected_escalated
-                    ]
+                            _safe_print(f"[pipeline] [消融-UniformFrames] S1={s1_count}帧, S2={s2_count}帧 (均匀选择)", flush=True)
+                        else:
+                            keyframe_selector = KeyframeSelector(progressive_config)
+                            frame_results = det_result.get("frame_results", [])
+                            tracks = det_result.get("tracks", {})
+                            fps = 30.0  # 默认帧率
 
-                    # 构建元数据包
-                    metadata_text_fast = build_metadata_pack(
-                        selected_fast, frame_results, tracks, progressive_config
-                    )
-                    metadata_text_escalated = build_metadata_pack(
-                        selected_escalated, frame_results, tracks, progressive_config
-                    )
+                            # [A1修复] 从frames中提取实际时间戳（相对于clip起点）
+                            # frames是[(ts, frame), ...]，ts是绝对时间，需转为clip内相对时间
+                            frame_timestamps = [ts - sample_start for ts, frame in frames] if frames else None
 
-                # 构建 clip 信息，用于 VLM 日志记录
-                clip_info = {
-                    "clip_id": clip["clip_id"],
-                    "clip_index": idx,
-                    "total_clips": total_clips,
-                    "video_path": clip.get("video_path"),
-                    "clip_source": clip.get("clip_source"),
-                    "start_time": clip["start_time"],
-                    "end_time": clip["end_time"],
-                    "duration": clip["end_time"] - clip["start_time"],
-                    "clip_score": clip.get("clip_score"),
-                    "is_accident": clip.get("is_accident"),
-                    "accident_score": clip.get("accident_score"),
-                    "keyframe_count": len(clip.get("keyframes", [])),
-                    "keyframe_paths": [k.get("image_path") for k in clip.get("keyframes", [])],
-                    # Coverage评分字段（事故模式）
-                    "collision_t0": clip.get("collision_t0"),
-                    "collision_t0_method": clip.get("collision_t0_method"),
-                    "coverage_score": clip.get("coverage_score"),
-                    "late_start_penalty": clip.get("late_start_penalty"),
-                    "final_score": clip.get("final_score"),
-                }
+                            # S1: FAST模式帧选择
+                            selected_fast = keyframe_selector.select_frames_for_clip(
+                                frame_results=frame_results,
+                                tracks=tracks,
+                                clip_start_time=clip["start_time"],
+                                clip_duration=clip["end_time"] - clip["start_time"],
+                                fps=fps,
+                                mode="FAST",
+                                frame_timestamps=frame_timestamps,  # [A1修复] 传入实际时间戳
+                            )
+                            selected_frames_fast = [
+                                {"frame_idx": r.frame_idx, "timestamp": r.timestamp, "reasons": r.reason_tags,
+                                 "score": r.score_components.get("combined", 0)}
+                                for r in selected_fast
+                            ]
 
-                # 收集预处理结果
-                preprocessed_clips.append({
-                    "clip": clip,
-                    "annotated_images": [a["path"] for a in annotated],
-                    "raw_images": raw_images,  # 渐进式VLM：无框原图
-                    "tracks_text": tracks_text,
-                    "traffic_light_text": traffic_light_text,
-                    "traffic_lights": traffic_lights,
-                    "clip_info": clip_info,
-                    "det_result": det_result,  # 保存YOLO检测结果(bbox, track_id)
-                    # 渐进式VLM数据
-                    "metadata_text_fast": metadata_text_fast,
-                    "metadata_text_escalated": metadata_text_escalated,
-                    "selected_frames_fast": selected_frames_fast,
-                    "selected_frames_escalated": selected_frames_escalated,
-                    "max_signal_score": max_signal_score,  # v2升级规则使用
-                    "engine_error": None,  # [C修复] 无错误
-                })
+                            # 计算max_signal_score（用于v2升级规则）
+                            max_signal_score = max((r.score_components.get("combined", 0) for r in selected_fast), default=0)
 
-                # 立即释放帧内存，避免OOM
-                del frames
-                del annotated
+                            # S2: ESCALATED模式帧选择
+                            selected_escalated = keyframe_selector.select_frames_for_clip(
+                                frame_results=frame_results,
+                                tracks=tracks,
+                                clip_start_time=clip["start_time"],
+                                clip_duration=clip["end_time"] - clip["start_time"],
+                                fps=fps,
+                                mode="ESCALATED",
+                                frame_timestamps=frame_timestamps,  # [A1修复] 传入实际时间戳
+                            )
+                            selected_frames_escalated = [
+                                {"frame_idx": r.frame_idx, "timestamp": r.timestamp, "reasons": r.reason_tags,
+                                 "score": r.score_components.get("combined", 0)}
+                                for r in selected_escalated
+                            ]
 
-            except Exception as e:
-                # [C修复] 捕获引擎错误，创建UNCERTAIN结果而非跳过
-                import traceback
-                engine_error = {
-                    "stage": "preprocess",
-                    "exc_type": type(e).__name__,
-                    "exc_msg": str(e),
-                    "stack_head": traceback.format_exc()[:500],
-                }
-                print(f"[pipeline] ⚠ clip {clip['clip_id']} 预处理异常: {type(e).__name__}: {str(e)[:100]}")
+                            # 构建元数据包
+                            metadata_text_fast = build_metadata_pack(
+                                selected_fast, frame_results, tracks, progressive_config
+                            )
+                            metadata_text_escalated = build_metadata_pack(
+                                selected_escalated, frame_results, tracks, progressive_config
+                            )
 
-                # 构建错误时的最小clip_info
-                clip_info = {
-                    "clip_id": clip["clip_id"],
-                    "clip_index": idx,
-                    "total_clips": total_clips,
-                    "start_time": clip["start_time"],
-                    "end_time": clip["end_time"],
-                    "duration": clip["end_time"] - clip["start_time"],
-                    "clip_score": clip.get("clip_score"),
-                }
+                    # 构建 clip 信息，用于 VLM 日志记录
+                    clip_info = {
+                        "clip_id": clip["clip_id"],
+                        "clip_index": idx,
+                        "total_clips": total_clips,
+                        "video_path": clip.get("video_path"),
+                        "clip_source": clip.get("clip_source"),
+                        "start_time": clip["start_time"],
+                        "end_time": clip["end_time"],
+                        "duration": clip["end_time"] - clip["start_time"],
+                        "clip_score": clip.get("clip_score"),
+                        "is_accident": clip.get("is_accident"),
+                        "accident_score": clip.get("accident_score"),
+                        "keyframe_count": len(clip.get("keyframes", [])),
+                        "keyframe_paths": [k.get("image_path") for k in clip.get("keyframes", [])],
+                        # Coverage评分字段（事故模式）
+                        "collision_t0": clip.get("collision_t0"),
+                        "collision_t0_method": clip.get("collision_t0_method"),
+                        "coverage_score": clip.get("coverage_score"),
+                        "late_start_penalty": clip.get("late_start_penalty"),
+                        "final_score": clip.get("final_score"),
+                    }
 
-                # 添加带错误标记的预处理结果，VLM阶段会处理为UNCERTAIN
-                preprocessed_clips.append({
-                    "clip": clip,
-                    "annotated_images": [],
-                    "raw_images": [],
-                    "tracks_text": "",
-                    "traffic_light_text": "",
-                    "traffic_lights": [],
-                    "clip_info": clip_info,
-                    "det_result": {},
-                    "metadata_text_fast": "",
-                    "metadata_text_escalated": "",
-                    "selected_frames_fast": [],
-                    "selected_frames_escalated": [],
-                    "max_signal_score": 0.0,
-                    "engine_error": engine_error,  # [C修复] 记录错误信息
-                })
+                    # 收集预处理结果
+                    preprocessed_clips.append({
+                        "clip": clip,
+                        "annotated_images": [a["path"] for a in annotated],
+                        "raw_images": raw_images,  # 渐进式VLM：无框原图
+                        "tracks_text": tracks_text,
+                        "traffic_light_text": traffic_light_text,
+                        "traffic_lights": traffic_lights,
+                        "clip_info": clip_info,
+                        "det_result": det_result,  # 保存YOLO检测结果(bbox, track_id)
+                        # 渐进式VLM数据
+                        "metadata_text_fast": metadata_text_fast,
+                        "metadata_text_escalated": metadata_text_escalated,
+                        "selected_frames_fast": selected_frames_fast,
+                        "selected_frames_escalated": selected_frames_escalated,
+                        "max_signal_score": max_signal_score,  # v2升级规则使用
+                        "engine_error": None,  # [C修复] 无错误
+                    })
 
-            self._progress(65 + int(10 * (idx + 1) / max(1, total_clips)), f"预处理进度 {idx+1}/{total_clips}")
+                    # 立即释放帧内存，避免OOM
+                    del frames
+                    del annotated
 
-        _safe_print(f"[pipeline] 预处理完成: {len(preprocessed_clips)} 个clips待VLM分析")
+                except Exception as e:
+                    # [C修复] 捕获引擎错误，创建UNCERTAIN结果而非跳过
+                    import traceback
+                    engine_error = {
+                        "stage": "preprocess",
+                        "exc_type": type(e).__name__,
+                        "exc_msg": str(e),
+                        "stack_head": traceback.format_exc()[:500],
+                    }
+                    print(f"[pipeline] ⚠ clip {clip['clip_id']} 预处理异常: {type(e).__name__}: {str(e)[:100]}")
 
-        # ============ [Top-1 Fallback] 无clip通过阈值时，强制送入top1 ============
-        # 通过 config.vlm.enable_top1_fallback 控制是否启用 (默认False保持向后兼容)
-        enable_top1_fallback = getattr(self.config.vlm, 'enable_top1_fallback', False)
-        fallback_info = {"fallback_to_top1": False, "fallback_reason": None, "fallback_clip_id": None, "fallback_clip_score": None}
+                    # 构建错误时的最小clip_info
+                    clip_info = {
+                        "clip_id": clip["clip_id"],
+                        "clip_index": idx,
+                        "total_clips": total_clips,
+                        "start_time": clip["start_time"],
+                        "end_time": clip["end_time"],
+                        "duration": clip["end_time"] - clip["start_time"],
+                        "clip_score": clip.get("clip_score"),
+                    }
 
-        if enable_top1_fallback and len(preprocessed_clips) == 0 and len(skipped_clips) > 0 and mode == "accident":
-            # 有候选clip但都因阈值被跳过 → 触发Top-1 fallback
-            # 按clip_score排序，取最高的一个
-            sorted_skipped = sorted(skipped_clips, key=lambda x: x["clip"].get("clip_score", 0.0), reverse=True)
-            top1_clip = sorted_skipped[0]["clip"]
-            top1_score = top1_clip.get("clip_score", 0.0)
-            threshold = self.config.vlm.clip_score_threshold
+                    # 添加带错误标记的预处理结果，VLM阶段会处理为UNCERTAIN
+                    preprocessed_clips.append({
+                        "clip": clip,
+                        "annotated_images": [],
+                        "raw_images": [],
+                        "tracks_text": "",
+                        "traffic_light_text": "",
+                        "traffic_lights": [],
+                        "clip_info": clip_info,
+                        "det_result": {},
+                        "metadata_text_fast": "",
+                        "metadata_text_escalated": "",
+                        "selected_frames_fast": [],
+                        "selected_frames_escalated": [],
+                        "max_signal_score": 0.0,
+                        "engine_error": engine_error,  # [C修复] 记录错误信息
+                    })
 
-            _safe_print(f"[pipeline] ⚡ Top-1 Fallback触发: 无clip通过阈值({threshold}), 强制送入top1 clip")
-            _safe_print(f"[pipeline]   clip_id={top1_clip['clip_id']}, score={top1_score:.4f} (阈值={threshold})")
+                self._progress(65 + int(10 * (idx + 1) / max(1, total_clips)), f"预处理进度 {idx+1}/{total_clips}")
 
-            fallback_info = {
-                "fallback_to_top1": True,
-                "fallback_reason": f"no_clip_pass_threshold ({len(skipped_clips)} clips all < {threshold})",
-                "fallback_clip_id": top1_clip["clip_id"],
-                "fallback_clip_score": {
-                    "final": top1_clip.get("final_score", top1_score),
-                    "base": top1_clip.get("base_score", 0.0),
-                    "coverage": top1_clip.get("coverage_score", 0.0),
-                }
-            }
+            _safe_print(f"[pipeline] 预处理完成: {len(preprocessed_clips)} 个clips待VLM分析")
 
-            # 对top1 clip执行预处理（复制原有预处理逻辑）
-            engine_error = None
-            try:
-                clip = top1_clip
-                if clip.get("clip_source") == "clipped":
-                    sample_start = 0.0
-                    sample_end = clip["end_time"] - clip["start_time"]
-                else:
-                    sample_start = clip["start_time"]
-                    sample_end = clip["end_time"]
+            # ============ [Top-1 Fallback] 无clip通过阈值时，强制送入top1 ============
+            # 通过 config.vlm.enable_top1_fallback 控制是否启用 (默认False保持向后兼容)
+            enable_top1_fallback = getattr(self.config.vlm, 'enable_top1_fallback', False)
+            fallback_info = {"fallback_to_top1": False, "fallback_reason": None, "fallback_clip_id": None, "fallback_clip_score": None}
 
-                clip_duration = clip["end_time"] - clip["start_time"]
-                progressive_config = self.config.progressive_vlm
-                if progressive_config.enabled and progressive_config.version == "v2":
-                    v2_frames = progressive_config.get_s1_frames(clip_duration)
-                    sampling_frames = max(v2_frames, self.config.cluster.accident_clip_sampling_frames, 16)
-                else:
-                    sampling_frames = self.config.cluster.accident_clip_sampling_frames
+            if enable_top1_fallback and len(preprocessed_clips) == 0 and len(skipped_clips) > 0 and mode == "accident":
+                # 有候选clip但都因阈值被跳过 → 触发Top-1 fallback
+                # 按clip_score排序，取最高的一个
+                sorted_skipped = sorted(skipped_clips, key=lambda x: x["clip"].get("clip_score", 0.0), reverse=True)
+                top1_clip = sorted_skipped[0]["clip"]
+                top1_score = top1_clip.get("clip_score", 0.0)
+                threshold = self.config.vlm.clip_score_threshold
 
-                frames = sample_frames_from_clip(clip["video_path"], sample_start, sample_end, sampling_frames)
-                det_result = gpu_service.run_yolo(frames)
+                _safe_print(f"[pipeline] ⚡ Top-1 Fallback触发: 无clip通过阈值({threshold}), 强制送入top1 clip")
+                _safe_print(f"[pipeline]   clip_id={top1_clip['clip_id']}, score={top1_score:.4f} (阈值={threshold})")
 
-                raw_frames_dir = os.path.join(output_paths["annotated_frames"], "raw")
-                raw_images = []
-                if progressive_config.enabled:
-                    raw_saved = save_raw_frames(frames, save_dir=raw_frames_dir, camera_id=camera_id,
-                                               date_str=date_str, clip_id=clip["clip_id"])
-                    raw_images = [r["path"] for r in raw_saved]
-
-                annotated = annotate_frames(frames, det_result.get("frame_results", []),
-                                           save_dir=output_paths["annotated_frames"], camera_id=camera_id,
-                                           date_str=date_str, roi_polygon=self.config.stream.roi_polygon,
-                                           clip_id=clip["clip_id"])
-                traffic_lights = self.light_detector.detect()
-                tracks_text = self._tracks_to_text(det_result.get("tracks", {}))
-                traffic_light_text = self._traffic_light_to_text(traffic_lights)
-
-                # 关键帧选择
-                metadata_text_fast = ""
-                metadata_text_escalated = ""
-                selected_frames_fast = []
-                selected_frames_escalated = []
-                max_signal_score = 0.0
-
-                if progressive_config.enabled:
-                    keyframe_selector = KeyframeSelector(progressive_config)
-                    frame_results = det_result.get("frame_results", [])
-                    tracks = det_result.get("tracks", {})
-                    frame_timestamps = [ts - sample_start for ts, frame in frames] if frames else None
-
-                    selected_fast = keyframe_selector.select_frames_for_clip(
-                        frame_results=frame_results, tracks=tracks, clip_start_time=clip["start_time"],
-                        clip_duration=clip_duration, fps=30.0, mode="FAST", frame_timestamps=frame_timestamps)
-                    selected_frames_fast = [{"frame_idx": r.frame_idx, "timestamp": r.timestamp,
-                                            "reason": r.reason_tags, "score": r.score_components.get("combined", 0)} for r in selected_fast]
-                    metadata_text_fast = build_metadata_pack(selected_fast, frame_results, tracks, progressive_config)
-                    max_signal_score = max([r.score_components.get("combined", 0) for r in selected_fast], default=0.0)
-
-                    selected_escalated = keyframe_selector.select_frames_for_clip(
-                        frame_results=frame_results, tracks=tracks, clip_start_time=clip["start_time"],
-                        clip_duration=clip_duration, fps=30.0, mode="ESCALATED", frame_timestamps=frame_timestamps)
-                    selected_frames_escalated = [{"frame_idx": r.frame_idx, "timestamp": r.timestamp,
-                                                 "reason": r.reason_tags, "score": r.score_components.get("combined", 0)} for r in selected_escalated]
-                    metadata_text_escalated = build_metadata_pack(selected_escalated, frame_results, tracks, progressive_config)
-
-                clip_info = {
-                    "clip_id": clip["clip_id"], "start_time": clip["start_time"], "end_time": clip["end_time"],
-                    "duration": clip_duration, "final_score": clip.get("final_score", top1_score),
-                    "base_score": clip.get("base_score", 0.0), "coverage_score": clip.get("coverage_score", 0.0),
+                fallback_info = {
                     "fallback_to_top1": True,
+                    "fallback_reason": f"no_clip_pass_threshold ({len(skipped_clips)} clips all < {threshold})",
+                    "fallback_clip_id": top1_clip["clip_id"],
+                    "fallback_clip_score": {
+                        "final": top1_clip.get("final_score", top1_score),
+                        "base": top1_clip.get("base_score", 0.0),
+                        "coverage": top1_clip.get("coverage_score", 0.0),
+                    }
                 }
 
-                preprocessed_clips.append({
-                    "clip": clip, "annotated_images": annotated, "raw_images": raw_images,
-                    "tracks_text": tracks_text, "traffic_light_text": traffic_light_text,
-                    "traffic_lights": traffic_lights, "clip_info": clip_info,
-                    "det_result": det_result, "metadata_text_fast": metadata_text_fast,
-                    "metadata_text_escalated": metadata_text_escalated, "selected_frames_fast": selected_frames_fast,
-                    "selected_frames_escalated": selected_frames_escalated, "max_signal_score": max_signal_score,
-                    "engine_error": None, "fallback_to_top1": True,
-                })
-                _safe_print(f"[pipeline] ✓ Top-1 Fallback预处理完成: {clip['clip_id']}")
+                # 对top1 clip执行预处理（复制原有预处理逻辑）
+                engine_error = None
+                try:
+                    clip = top1_clip
+                    if clip.get("clip_source") == "clipped":
+                        sample_start = 0.0
+                        sample_end = clip["end_time"] - clip["start_time"]
+                    else:
+                        sample_start = clip["start_time"]
+                        sample_end = clip["end_time"]
 
-            except Exception as e:
-                import traceback
-                engine_error = {"stage": "fallback_preprocess", "exc_type": type(e).__name__, "exc_msg": str(e)[:200]}
-                _safe_print(f"[pipeline] ✗ Top-1 Fallback预处理失败: {e}")
-                traceback.print_exc()
-                # 即使预处理失败也添加到队列，让VLM返回UNCERTAIN
-                preprocessed_clips.append({
-                    "clip": top1_clip, "annotated_images": [], "raw_images": [],
-                    "tracks_text": "", "traffic_light_text": "", "traffic_lights": [],
-                    "clip_info": {"clip_id": top1_clip["clip_id"], "fallback_to_top1": True},
-                    "det_result": {}, "metadata_text_fast": "", "metadata_text_escalated": "",
-                    "selected_frames_fast": [], "selected_frames_escalated": [], "max_signal_score": 0.0,
-                    "engine_error": engine_error, "fallback_to_top1": True,
-                })
+                    clip_duration = clip["end_time"] - clip["start_time"]
+                    progressive_config = self.config.progressive_vlm
+                    if progressive_config.enabled and progressive_config.version == "v2":
+                        v2_frames = progressive_config.get_s1_frames(clip_duration)
+                        sampling_frames = max(v2_frames, self.config.cluster.accident_clip_sampling_frames, 16)
+                    else:
+                        sampling_frames = self.config.cluster.accident_clip_sampling_frames
+
+                    frames = sample_frames_from_clip(clip["video_path"], sample_start, sample_end, sampling_frames)
+
+                    # YOLO 检测（消融 disable_yolo 时返回空结果）
+                    if self.config.detector.enabled:
+                        det_result = gpu_service.run_yolo(frames)
+                    else:
+                        det_result = {
+                            "frame_results": [{"boxes": [], "labels": [], "scores": [], "track_ids": []} for _ in frames],
+                            "tracks": {},
+                        }
+
+                    raw_frames_dir = os.path.join(output_paths["annotated_frames"], "raw")
+                    raw_images = []
+                    if progressive_config.enabled:
+                        raw_saved = save_raw_frames(frames, save_dir=raw_frames_dir, camera_id=camera_id,
+                                                   date_str=date_str, clip_id=clip["clip_id"])
+                        raw_images = [r["path"] for r in raw_saved]
+
+                    annotated = annotate_frames(frames, det_result.get("frame_results", []),
+                                               save_dir=output_paths["annotated_frames"], camera_id=camera_id,
+                                               date_str=date_str, roi_polygon=self.config.stream.roi_polygon,
+                                               clip_id=clip["clip_id"])
+                    traffic_lights = self.light_detector.detect()
+                    tracks_text = self._tracks_to_text(det_result.get("tracks", {}))
+                    traffic_light_text = self._traffic_light_to_text(traffic_lights)
+
+                    # 关键帧选择
+                    metadata_text_fast = ""
+                    metadata_text_escalated = ""
+                    selected_frames_fast = []
+                    selected_frames_escalated = []
+                    max_signal_score = 0.0
+
+                    if progressive_config.enabled:
+                        keyframe_selector = KeyframeSelector(progressive_config)
+                        frame_results = det_result.get("frame_results", [])
+                        tracks = det_result.get("tracks", {})
+                        frame_timestamps = [ts - sample_start for ts, frame in frames] if frames else None
+
+                        selected_fast = keyframe_selector.select_frames_for_clip(
+                            frame_results=frame_results, tracks=tracks, clip_start_time=clip["start_time"],
+                            clip_duration=clip_duration, fps=30.0, mode="FAST", frame_timestamps=frame_timestamps)
+                        selected_frames_fast = [{"frame_idx": r.frame_idx, "timestamp": r.timestamp,
+                                                "reason": r.reason_tags, "score": r.score_components.get("combined", 0)} for r in selected_fast]
+                        metadata_text_fast = build_metadata_pack(selected_fast, frame_results, tracks, progressive_config)
+                        max_signal_score = max([r.score_components.get("combined", 0) for r in selected_fast], default=0.0)
+
+                        selected_escalated = keyframe_selector.select_frames_for_clip(
+                            frame_results=frame_results, tracks=tracks, clip_start_time=clip["start_time"],
+                            clip_duration=clip_duration, fps=30.0, mode="ESCALATED", frame_timestamps=frame_timestamps)
+                        selected_frames_escalated = [{"frame_idx": r.frame_idx, "timestamp": r.timestamp,
+                                                     "reason": r.reason_tags, "score": r.score_components.get("combined", 0)} for r in selected_escalated]
+                        metadata_text_escalated = build_metadata_pack(selected_escalated, frame_results, tracks, progressive_config)
+
+                    clip_info = {
+                        "clip_id": clip["clip_id"], "start_time": clip["start_time"], "end_time": clip["end_time"],
+                        "duration": clip_duration, "final_score": clip.get("final_score", top1_score),
+                        "base_score": clip.get("base_score", 0.0), "coverage_score": clip.get("coverage_score", 0.0),
+                        "fallback_to_top1": True,
+                    }
+
+                    preprocessed_clips.append({
+                        "clip": clip, "annotated_images": annotated, "raw_images": raw_images,
+                        "tracks_text": tracks_text, "traffic_light_text": traffic_light_text,
+                        "traffic_lights": traffic_lights, "clip_info": clip_info,
+                        "det_result": det_result, "metadata_text_fast": metadata_text_fast,
+                        "metadata_text_escalated": metadata_text_escalated, "selected_frames_fast": selected_frames_fast,
+                        "selected_frames_escalated": selected_frames_escalated, "max_signal_score": max_signal_score,
+                        "engine_error": None, "fallback_to_top1": True,
+                    })
+                    _safe_print(f"[pipeline] ✓ Top-1 Fallback预处理完成: {clip['clip_id']}")
+
+                except Exception as e:
+                    import traceback
+                    engine_error = {"stage": "fallback_preprocess", "exc_type": type(e).__name__, "exc_msg": str(e)[:200]}
+                    _safe_print(f"[pipeline] ✗ Top-1 Fallback预处理失败: {e}")
+                    traceback.print_exc()
+                    # 即使预处理失败也添加到队列，让VLM返回UNCERTAIN
+                    preprocessed_clips.append({
+                        "clip": top1_clip, "annotated_images": [], "raw_images": [],
+                        "tracks_text": "", "traffic_light_text": "", "traffic_lights": [],
+                        "clip_info": {"clip_id": top1_clip["clip_id"], "fallback_to_top1": True},
+                        "det_result": {}, "metadata_text_fast": "", "metadata_text_escalated": "",
+                        "selected_frames_fast": [], "selected_frames_escalated": [], "max_signal_score": 0.0,
+                        "engine_error": engine_error, "fallback_to_top1": True,
+                    })
+
+            # === 保存预处理缓存 ===
+            _cache_dir = os.path.join(output_paths["base"], "preprocess_cache")
+            os.makedirs(_cache_dir, exist_ok=True)
+            _cache_file = os.path.join(_cache_dir, f"{video_name}.json.gz")
+            try:
+                def _strip_pil(prep):
+                    p = dict(prep)
+                    c = dict(p.get("clip", {}))
+                    if "keyframes" in c:
+                        c["keyframes"] = [{k: v for k, v in kf.items() if k != "image"} for kf in c["keyframes"]]
+                    p["clip"] = c
+                    return p
+                _cache_data = {
+                    "preprocessed_clips": [_strip_pil(p) for p in preprocessed_clips],
+                    "skipped_clips": [_strip_pil(s) for s in skipped_clips],
+                }
+                with gzip.open(_cache_file, 'wt', encoding='utf-8') as _cf:
+                    json.dump(_cache_data, _cf, ensure_ascii=False, default=_json_default)
+                print(f"[pipeline] 预处理缓存已保存: {_cache_file}")
+            except Exception as _e:
+                print(f"[pipeline] ⚠ 缓存保存失败: {_e}")
+
+
 
         # ============ 阶段B：VLM并行调用 ============
         intersection_info = {
@@ -1156,6 +1309,9 @@ class TrafficVLMPipeline:
                 low_confidence = []
 
                 for d in detections:
+                    if not isinstance(d, dict):
+                        # VLM 返回字符串列表（如 ["collision"]）时跳过分级
+                        continue
                     conf = d.get("confidence", 0)
                     if conf >= confirmed_threshold:
                         d["confidence_level"] = "confirmed"  # 确定事故
@@ -1214,7 +1370,8 @@ class TrafficVLMPipeline:
             self._progress(90 + int(10 * (idx + 1) / max(1, len(preprocessed_clips))), f"落盘进度 {idx+1}/{len(preprocessed_clips)}")
 
         self._progress(100, "分析完成")
-        manager.release()
+        if manager is not None:
+            manager.release()
 
         # P2: 性能监控统计
         processing_time = (datetime.now(timezone.utc) - run_start_time).total_seconds()

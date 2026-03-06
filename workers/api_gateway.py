@@ -21,7 +21,7 @@ from flask import Flask, request, jsonify, g
 from functools import wraps
 
 from workers.common.logging_config import setup_logger, LogContext
-from workers.common.redis_client import RedisStreamClient, VideoTask
+from workers.common.redis_client import RedisStreamClient, VideoTask, EdgeEvent
 
 # 配置
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
@@ -303,6 +303,130 @@ def get_camera_events(camera_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/v1/edge/events", methods=["POST"])
+@with_trace_id
+def receive_edge_event():
+    """
+    接收边缘触发事件
+
+    请求体 (来自 Edge Trigger):
+    {
+        "camera_id": "cam_001",
+        "timestamp": 1234567890,
+        "similarity_score": 0.15,
+        "keyframe_count": 5,
+        "keyframes_base64": ["base64_img1", ...],
+        "window_path": "/edge/videos/windows/cam_001/window_123.mp4",
+        "trigger_time": "2025-01-31T12:00:00Z"
+    }
+
+    响应:
+    {
+        "status": "accepted",
+        "job_id": "cam_001_1234567890",
+        "trace_id": "uuid"
+    }
+    """
+    data = request.json
+    if not data:
+        return jsonify({"error": "Missing request body"}), 400
+
+    required_fields = ["camera_id", "timestamp", "similarity_score"]
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"error": f"Missing required field: {field}"}), 400
+
+    camera_id = data["camera_id"]
+    timestamp = int(data["timestamp"])
+    trace_id = g.trace_id
+    job_id = f"{camera_id}_{timestamp}"
+
+    try:
+        # 创建边缘事件
+        event = EdgeEvent(
+            camera_id=camera_id,
+            timestamp=timestamp,
+            similarity_score=float(data["similarity_score"]),
+            keyframe_count=int(data.get("keyframe_count", 0)),
+            keyframes_base64=data.get("keyframes_base64", []),
+            window_path=data.get("window_path", ""),
+            trigger_time=data.get("trigger_time", datetime.utcnow().isoformat() + "Z"),
+            trace_id=trace_id
+        )
+
+        # 添加到边缘事件队列
+        redis = get_redis()
+        redis.add_edge_event(event)
+
+        log.info(
+            f"边缘事件已接收: {job_id}, score={event.similarity_score:.4f}",
+            job_id=job_id,
+            trace_id=trace_id,
+            camera_id=camera_id
+        )
+
+        return jsonify({
+            "status": "accepted",
+            "job_id": job_id,
+            "trace_id": trace_id,
+            "similarity_score": event.similarity_score,
+            "keyframe_count": event.keyframe_count
+        })
+
+    except Exception as e:
+        log.error(f"接收边缘事件失败: {e}", trace_id=trace_id)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/v1/edge/events", methods=["GET"])
+@with_trace_id
+def list_edge_events():
+    """
+    查询边缘事件队列状态
+
+    查询参数:
+    - limit: 返回数量限制（默认 10）
+
+    响应:
+    {
+        "queue_length": 5,
+        "events": [...]
+    }
+    """
+    try:
+        limit = request.args.get("limit", type=int, default=10)
+        redis = get_redis()
+
+        # 获取队列长度
+        queue_len = redis.client.xlen(RedisStreamClient.STREAM_EDGE_EVENTS)
+
+        # 读取最近的事件（不消费，仅查看）
+        events = redis.client.xrange(
+            RedisStreamClient.STREAM_EDGE_EVENTS,
+            "-", "+",
+            count=limit
+        )
+
+        event_list = []
+        for msg_id, data in events:
+            event_list.append({
+                "msg_id": msg_id,
+                "camera_id": data.get("camera_id"),
+                "timestamp": data.get("timestamp"),
+                "similarity_score": data.get("similarity_score"),
+                "trigger_time": data.get("trigger_time")
+            })
+
+        return jsonify({
+            "queue_length": queue_len,
+            "events": event_list
+        })
+
+    except Exception as e:
+        log.error(f"查询边缘事件失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/v1/stats", methods=["GET"])
 @with_trace_id
 def get_stats():
@@ -325,6 +449,7 @@ def get_stats():
         # 队列统计
         video_len = redis.client.xlen(RedisStreamClient.STREAM_VIDEO_TASKS)
         result_len = redis.client.xlen(RedisStreamClient.STREAM_RESULT_TASKS)
+        edge_len = redis.client.xlen(RedisStreamClient.STREAM_EDGE_EVENTS)
 
         # 摄像头列表
         cameras = []
@@ -335,7 +460,8 @@ def get_stats():
         return jsonify({
             "queues": {
                 "video_tasks": {"length": video_len},
-                "result_tasks": {"length": result_len}
+                "result_tasks": {"length": result_len},
+                "edge_events": {"length": edge_len}
             },
             "cameras": cameras,
             "timestamp": datetime.utcnow().isoformat() + "Z"

@@ -144,8 +144,46 @@ def predict_file(
         if "repetition_penalty" in config:
             vlm_config.vlm.repetition_penalty = config["repetition_penalty"]
 
-        # 强制启用YOLO检测（评测必需）
-        vlm_config.detector.enabled = True
+        # 消融测试：跳过SigLIP
+        if "ablation_skip_siglip" in config:
+            vlm_config.embedding.ablation_skip_siglip = config["ablation_skip_siglip"]
+
+        # 消融 v2：跳过 metadata 文本
+        if config.get("ablation_skip_metadata"):
+            vlm_config.progressive_vlm.include_object_metadata_text = False
+
+        # 消融 v2：强制均匀帧选择
+        if config.get("ablation_force_uniform"):
+            vlm_config.progressive_vlm.ablation_force_uniform_frames = True
+
+        # 消融 v2：跳过 MOG2 运动检测
+        if config.get("ablation_skip_mog2"):
+            vlm_config.stream.ablation_skip_mog2 = True
+
+        # 方案A：压制 motion_peak 选帧信号
+        if config.get("ablation_suppress_motion_peak"):
+            vlm_config.progressive_vlm.ablation_suppress_motion_peak = True
+
+        # 预处理缓存复用
+        if "reuse_preprocess_dir" in config:
+            vlm_config.vlm.reuse_preprocess_dir = config["reuse_preprocess_dir"]
+
+        # Phase B: Image RAG
+        if config.get("accident_rag_enabled"):
+            vlm_config.vlm.accident_rag_enabled = True
+            if "accident_rag_exemplars_dir" in config:
+                vlm_config.vlm.accident_rag_exemplars_dir = config["accident_rag_exemplars_dir"]
+            if "accident_rag_top_k" in config:
+                vlm_config.vlm.accident_rag_top_k = config["accident_rag_top_k"]
+
+        # 中间数据存储隔离：按 output_dir 隔离 data/
+        if "base_dir" in config:
+            vlm_config.datastore.base_dir = config["base_dir"]
+            vlm_config.datastore.sqlite_path = os.path.join(config["base_dir"], "index.db")
+
+        # YOLO 检测：默认启用，消融 disable_yolo 时关闭
+        if not config.get("ablation_disable_yolo", False):
+            vlm_config.detector.enabled = True
 
         # 创建pipeline
         if pipeline is None:
@@ -171,6 +209,7 @@ def predict_file(
         # pred_label优先级: YES > UNCERTAIN > NO
         pred_label = "NO"
         has_uncertain = False
+        vlm_called_count = 0
 
         for r in final_results:
             clip = r.get("clip", {})
@@ -183,12 +222,17 @@ def predict_file(
             confidence = vlm_output.get("confidence", 0.0)
             kept = vlm_output.get("retain_flag", vlm_output.get("kept", False))
             keep_reason = vlm_output.get("retain_reason", vlm_output.get("keep_reason", ""))
+            vlm_called_count += 1
 
-            # 基于verdict更新pred_label（优先级: YES > UNCERTAIN > NO）
+            # 基于verdict更新pred_label（优先级: YES > POST_EVENT_ONLY > UNCERTAIN > NO）
             if verdict == "YES":
                 pred_label = "YES"
                 if not decision_reason.startswith("检测到事故"):
                     decision_reason = f"检测到事故: clip={clip.get('clip_id')}, verdict=YES"
+            elif verdict == "POST_EVENT_ONLY" and pred_label != "YES":
+                pred_label = "YES"
+                if not decision_reason.startswith("检测到事故"):
+                    decision_reason = f"检测到事故(后果): clip={clip.get('clip_id')}, verdict=POST_EVENT_ONLY"
             elif verdict == "UNCERTAIN" and pred_label != "YES":
                 pred_label = "UNCERTAIN"
                 has_uncertain = True
@@ -204,6 +248,10 @@ def predict_file(
                 kept=kept,
                 keep_reason=keep_reason,
             ))
+
+        # 修正 decision_reason: 区分"无clip通过阈值"和"VLM全判NO"
+        if pred_label == "NO" and vlm_called_count > 0:
+            decision_reason = f"VLM全判NO ({vlm_called_count}个clip均判定无事故)"
 
         # predicted_has_accident 现在仅在 pred_label=="YES" 时为True（STRICT模式）
         # CONSERVATIVE模式可以在外层通过 pred_label in ("YES", "UNCERTAIN") 判断
@@ -246,6 +294,10 @@ class Evaluator:
         subset_per_class: int = 0,  # 0=全量
         seed: int = 42,
         dump_video_results: bool = False,  # 新增：是否保存result.json.gz
+        acc_exclude_subdirs: Optional[List[str]] = None,  # 从事故目录排除的子目录名
+        extra_nonacc_dirs: Optional[List[str]] = None,  # 额外非事故目录
+        shard_id: Optional[int] = None,  # 分片ID（从0开始）
+        num_shards: Optional[int] = None,  # 总分片数
     ):
         self.acc_dir = acc_dir
         self.nonacc_dir = nonacc_dir
@@ -255,9 +307,29 @@ class Evaluator:
         self.seed = seed
         self.dump_video_results = dump_video_results
 
-        # 扫描文件
-        self.acc_files = self._scan_mp4(acc_dir)
+        # 扫描文件（递归，支持排除子目录）
+        self.acc_files = self._scan_mp4(acc_dir, exclude_subdirs=acc_exclude_subdirs)
         self.nonacc_files = self._scan_mp4(nonacc_dir)
+
+        # 追加额外非事故目录的文件
+        if extra_nonacc_dirs:
+            for extra_dir in extra_nonacc_dirs:
+                extra_files = self._scan_mp4(extra_dir)
+                print(f"[Evaluator] 额外非事故目录 '{extra_dir}': {len(extra_files)} 个文件")
+                self.nonacc_files.extend(extra_files)
+            self.nonacc_files = sorted(self.nonacc_files)
+
+        # 分片过滤（用于多进程并行）
+        if shard_id is not None and num_shards is not None:
+            all_files = sorted(self.acc_files + self.nonacc_files)
+            shard_files = set(all_files[shard_id::num_shards])
+            orig_acc = len(self.acc_files)
+            orig_nonacc = len(self.nonacc_files)
+            self.acc_files = [f for f in self.acc_files if f in shard_files]
+            self.nonacc_files = [f for f in self.nonacc_files if f in shard_files]
+            print(f"[Evaluator] 分片 {shard_id}/{num_shards}: "
+                  f"事故 {orig_acc}→{len(self.acc_files)}, "
+                  f"非事故 {orig_nonacc}→{len(self.nonacc_files)}")
 
         # 如果指定了subset，随机抽样
         if subset_per_class > 0:
@@ -270,10 +342,34 @@ class Evaluator:
 
         print(f"[Evaluator] 事故文件: {len(self.acc_files)}, 非事故文件: {len(self.nonacc_files)}")
 
-    def _scan_mp4(self, directory: str) -> List[str]:
-        """扫描目录下的mp4文件（一级目录）"""
-        pattern = os.path.join(directory, "*.mp4")
-        files = glob.glob(pattern)
+    def _scan_mp4(self, directory: str, exclude_subdirs: Optional[List[str]] = None) -> List[str]:
+        """扫描目录下的mp4文件（递归，支持排除子目录）
+
+        Args:
+            directory: 扫描根目录
+            exclude_subdirs: 要排除的子目录名列表（如 ["非机动车违法事件视频"]）
+        """
+        pattern = os.path.join(directory, "**", "*.mp4")
+        files = glob.glob(pattern, recursive=True)
+        if not files:
+            # 兼容：递归无结果时尝试一级目录
+            pattern = os.path.join(directory, "*.mp4")
+            files = glob.glob(pattern)
+
+        # 排除指定子目录
+        if exclude_subdirs:
+            filtered = []
+            for f in files:
+                rel_path = os.path.relpath(f, directory)
+                parts = rel_path.replace("\\", "/").split("/")
+                # 检查路径中是否包含要排除的子目录
+                if not any(excl in parts for excl in exclude_subdirs):
+                    filtered.append(f)
+            excluded_count = len(files) - len(filtered)
+            if excluded_count > 0:
+                print(f"[Evaluator] 排除 {excluded_count} 个文件 (子目录: {exclude_subdirs})")
+            files = filtered
+
         return sorted(files)
 
     def _dump_video_result(self, video_path: str, pred_result: 'PredictResult', ground_truth: bool):
@@ -287,8 +383,9 @@ class Evaluator:
         """
         import gzip
 
-        # 创建输出目录
-        output_dir = "data/video_results"
+        # 创建输出目录（使用隔离的 base_dir）
+        base_dir = self.config.get("base_dir", "data")
+        output_dir = os.path.join(base_dir, "video_results")
         os.makedirs(output_dir, exist_ok=True)
 
         # 生成文件名（使用视频文件名）
@@ -330,6 +427,61 @@ class Evaluator:
 
         print(f"    ✓ result.json.gz已保存: {output_file}")
 
+    def _try_load_cached_result(self, video_path: str, ground_truth: bool) -> Optional[EvalResult]:
+        """
+        尝试从 result.json.gz 缓存中加载已有结果。
+
+        Returns:
+            EvalResult if cached, None otherwise
+        """
+        import gzip
+
+        base_dir = self.config.get("base_dir", "data")
+        video_name = os.path.basename(video_path)
+        cache_file = os.path.join(base_dir, "video_results", f"{video_name}.result.json.gz")
+
+        if not os.path.exists(cache_file):
+            return None
+
+        try:
+            with gzip.open(cache_file, 'rt', encoding='utf-8') as f:
+                cached = json.load(f)
+
+            pred = cached.get("prediction", {})
+            pred_label = pred.get("pred_label", "NO")
+            predicted_has_accident = pred.get("predicted_has_accident", False)
+            decision_reason = pred.get("decision_reason", "从缓存加载")
+            has_uncertain = pred.get("has_uncertain", False)
+
+            pred_result = PredictResult(
+                video_path=video_path,
+                predicted_has_accident=predicted_has_accident,
+                decision_reason=decision_reason,
+                topk=[],
+                processing_time=cached.get("run_metadata", {}).get("processing_time", 0),
+                error=cached.get("run_metadata", {}).get("error"),
+                pred_label=pred_label,
+                has_uncertain=has_uncertain,
+                raw_pipeline_result={
+                    "clips": cached.get("clips", []),
+                    "results": cached.get("results", []),
+                    "skipped_clips": cached.get("skipped_clips", []),
+                    "vlm_stats": cached.get("vlm_stats", {}),
+                    "templates": cached.get("templates", []),
+                },
+            )
+
+            return EvalResult(
+                video_path=video_path,
+                ground_truth=ground_truth,
+                predicted=predicted_has_accident,
+                correct=(predicted_has_accident == ground_truth),
+                predict_result=pred_result,
+            )
+        except Exception as e:
+            print(f"    [缓存] 读取失败，将重新处理: {e}")
+            return None
+
     def run(self, eval_id: Optional[str] = None) -> Dict:
         """
         运行评测
@@ -344,11 +496,24 @@ class Evaluator:
         os.makedirs(eval_dir, exist_ok=True)
 
         results: List[EvalResult] = []
+        cached_count = 0
 
         # 处理事故文件（正样本）
         print(f"\n[Evaluator] 处理事故文件 ({len(self.acc_files)}个)...")
         for i, video_path in enumerate(self.acc_files):
             print(f"  [{i+1}/{len(self.acc_files)}] {os.path.basename(video_path)}")
+
+            # 尝试从缓存恢复
+            if self.dump_video_results:
+                cached = self._try_load_cached_result(video_path, ground_truth=True)
+                if cached is not None:
+                    results.append(cached)
+                    cached_count += 1
+                    pr = cached.predict_result
+                    print(f"    [缓存] 预测: {'事故' if pr.predicted_has_accident else '非事故'} "
+                          f"({'正确' if pr.predicted_has_accident else '漏报'})")
+                    continue
+
             pred_result = predict_file(video_path, self.config)
 
             # 保存result.json.gz（如果启用）
@@ -371,6 +536,18 @@ class Evaluator:
         print(f"\n[Evaluator] 处理非事故文件 ({len(self.nonacc_files)}个)...")
         for i, video_path in enumerate(self.nonacc_files):
             print(f"  [{i+1}/{len(self.nonacc_files)}] {os.path.basename(video_path)}")
+
+            # 尝试从缓存恢复
+            if self.dump_video_results:
+                cached = self._try_load_cached_result(video_path, ground_truth=False)
+                if cached is not None:
+                    results.append(cached)
+                    cached_count += 1
+                    pr = cached.predict_result
+                    print(f"    [缓存] 预测: {'事故' if pr.predicted_has_accident else '非事故'} "
+                          f"({'误报' if pr.predicted_has_accident else '正确'})")
+                    continue
+
             pred_result = predict_file(video_path, self.config)
 
             # 保存result.json.gz（如果启用）
@@ -388,6 +565,9 @@ class Evaluator:
             print(f"    预测: {'事故' if pred_result.predicted_has_accident else '非事故'} "
                   f"({'误报' if pred_result.predicted_has_accident else '正确'}) "
                   f"- {pred_result.decision_reason[:50]}")
+
+        if cached_count > 0:
+            print(f"\n[Evaluator] 缓存恢复: {cached_count}/{len(results)} 个视频从缓存加载")
 
         # 计算指标（两套口径）
         from .metrics import compute_metrics_dual
@@ -575,7 +755,7 @@ class Evaluator:
                 f.write(f"- **Decision Reason**: {r.predict_result.decision_reason if r.predict_result else 'N/A'}\n\n")
 
                 # 尝试读取 result.json.gz 获取详细信息
-                result_file = os.path.join("data/video_results", f"{video_name}.result.json.gz")
+                result_file = os.path.join(self.config.get("base_dir", "data"), "video_results", f"{video_name}.result.json.gz")
                 if os.path.exists(result_file):
                     try:
                         with gzip.open(result_file, 'rt', encoding='utf-8') as rf:
@@ -632,7 +812,7 @@ class Evaluator:
                 f.write(f"- **Decision Reason**: {r.predict_result.decision_reason if r.predict_result else 'N/A'}\n\n")
 
                 # 尝试读取详细信息
-                result_file = os.path.join("data/video_results", f"{video_name}.result.json.gz")
+                result_file = os.path.join(self.config.get("base_dir", "data"), "video_results", f"{video_name}.result.json.gz")
                 if os.path.exists(result_file):
                     try:
                         with gzip.open(result_file, 'rt', encoding='utf-8') as rf:
@@ -692,7 +872,7 @@ class Evaluator:
             }
 
             # 尝试读取详细结果构建决策链
-            result_file = os.path.join("data/video_results", f"{video_name}.result.json.gz")
+            result_file = os.path.join(self.config.get("base_dir", "data"), "video_results", f"{video_name}.result.json.gz")
             if os.path.exists(result_file):
                 try:
                     with gzip.open(result_file, 'rt', encoding='utf-8') as rf:

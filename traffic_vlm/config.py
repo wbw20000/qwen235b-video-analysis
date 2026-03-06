@@ -19,18 +19,26 @@ class StreamConfig:
     min_keyframe_interval: float = 2.0
     roi_polygon: Optional[List[Tuple[int, int]]] = None
 
+    # 消融测试：跳过MOG2运动检测，全视频均匀采样关键帧
+    ablation_skip_mog2: bool = False
+
 
 @dataclass
 class EmbeddingConfig:
     """SigLIP 编码与向量检索配置。"""
 
-    model_name: str = "/data/models/siglip-base-patch16-384"
+    model_name: str = os.environ.get(
+        "SIGLIP_MODEL_NAME",
+        "/data/models/siglip-base-patch16-384" if os.path.exists("/data/models/siglip-base-patch16-384")
+        else "google/siglip-base-patch16-384"
+    )
     device: str = "auto"
     batch_size: int = 16  # 优化：从8改为16，加速SigLIP嵌入计算
     top_m_per_template: int = 80
     frame_top_n: int = 80
     candidate_clip_top_k: int = 12
     clip_embedding_frames: int = 10
+    ablation_skip_siglip: bool = False  # 消融测试：跳过SigLIP编码和检索
 
 
 @dataclass
@@ -83,11 +91,11 @@ class VLMConfig:
     top_clips: int = 3
     annotated_frames_per_clip: int = 6
     accident_frames_per_clip: int = 12  # 事故模式：发送更多帧给VLM
-    temperature: float = 0.4
+    temperature: float = 0.0               # greedy decoding，消除VLM随机性
 
     # 模型sweep参数透传
     top_p: float = 1.0                   # top_p采样参数
-    max_tokens: int = 2000               # 最大输出token数
+    max_tokens: int = 8192               # 最大输出token数（Qwen3.5 thinking模型需要更多空间）
     repetition_penalty: float = 1.0      # 重复惩罚系数
 
     # P0优化：VLM调用阈值过滤
@@ -100,12 +108,20 @@ class VLMConfig:
                                         # confidence >= clip_score_threshold → YES (if verdict=YES)
 
     # P0优化：图像压缩减少传输（当前已关闭，发送原始标注图片）
-    image_max_width: int = 640          # 图像最大宽度（像素）
-    image_quality: int = 70             # JPEG压缩质量（1-100）
+    image_max_width: int = 1280         # 图像最大宽度（像素）— 从640提升到1280，改善4K路侧视频小目标识别
+    image_quality: int = 80             # JPEG压缩质量（1-100）— 从70提升到80，减少压缩伪影
     compress_images: bool = True        # 是否启用图像压缩（True=压缩后发送）
 
     # VLM并行调用配置
     vlm_max_concurrent: int = 3         # VLM最大并发数（3个并发请求）
+
+    # 预处理缓存复用（消融测试加速）
+    reuse_preprocess_dir: Optional[str] = None  # 复用预处理缓存的base_dir路径
+
+    # Image RAG — 视觉样本检索注入（Phase B, Unleashing VLMs arXiv:2601.10551）
+    accident_rag_enabled: bool = False                           # 人工确认 exemplar 帧后设为 True
+    accident_rag_exemplars_dir: str = "data/accident_exemplars"  # 已确认 TP 关键帧目录
+    accident_rag_top_k: int = 2                                  # 每次注入的样本帧数
 
     # VLM结果置信度分级（软过滤，降低误检率）
     confidence_confirmed_threshold: float = 0.7   # >= 0.7 为"确定事故"
@@ -303,6 +319,11 @@ class ProgressiveVLMConfig:
     interaction_peak_weight: float = 0.4          # 交互峰值权重（最重要）
     trajectory_break_weight: float = 0.2          # 轨迹中断权重
     post_event_cue_weight: float = 0.1            # 事故后线索权重
+
+    # 消融测试：强制均匀帧选择（跳过KeyframeSelector信号计算）
+    ablation_force_uniform_frames: bool = False
+    # 方案A：压制 motion_peak 信号（权重清零，不作为选帧依据）
+    ablation_suppress_motion_peak: bool = False
 
     # S2升级后的verdict解析规则
     # 保守策略：优先避免FPR上升
@@ -587,36 +608,36 @@ class TemplateConfig:
 
             # 交通事故
             "vehicle_to_vehicle_accident": [
-                "路口画面两辆机动车发生碰撞",
-                "监控视频中汽车之间发生碰撞",
-                "机动车追尾前车",
-                "两车相撞，车辆受损",
-                "十字路口车辆侧面碰撞",
+                "This is a photo of two vehicles colliding at an intersection",
+                "This is a photo of a car rear-ending another vehicle on the road",
+                "This is a photo of a side collision between two cars at a crossroad",
+                "This is a photo of a traffic accident with vehicle damage and debris",
+                "This is a photo of cars crashing into each other on the road",
             ],
             "vehicle_to_bike_accident": [
-                "路口画面机动车与二轮车发生碰撞",
-                "监控视频中汽车与电动车发生碰撞",
-                "机动车与自行车发生接触",
-                "汽车与摩托车碰撞后骑车人摔倒",
-                "路口机动车撞到电动车",
+                "This is a photo of a car colliding with a bicycle at an intersection",
+                "This is a photo of a vehicle hitting an electric scooter on the road",
+                "This is a photo of a motorcycle rider falling after being hit by a car",
+                "This is a photo of a car crashing into an e-bike at a crossroad",
+                "This is a photo of a traffic accident between a vehicle and a cyclist",
             ],
             "vehicle_to_pedestrian_accident": [
-                "路口画面机动车与行人发生碰撞",
-                "监控视频中汽车撞到行人",
-                "机动车在人行横道撞到行人",
-                "车辆与行人发生交通事故",
+                "This is a photo of a car hitting a pedestrian at a crosswalk",
+                "This is a photo of a vehicle colliding with a person on the road",
+                "This is a photo of a pedestrian being struck by a car at an intersection",
+                "This is a photo of a traffic accident involving a vehicle and a pedestrian",
             ],
             "multi_vehicle_accident": [
-                "路口画面多车连环相撞",
-                "监控视频中三辆或以上车辆连环相撞",
-                "多车连撞事故",
-                "车辆连环追尾事故",
+                "This is a photo of a multi-vehicle pileup at an intersection",
+                "This is a photo of three or more cars in a chain collision on the road",
+                "This is a photo of multiple vehicles crashing in a chain reaction accident",
+                "This is a photo of a multi-car rear-end collision on the highway",
             ],
             "hit_and_run": [
-                "发生交通事故后车辆逃离现场",
-                "肇事车辆逃逸",
-                "碰撞后未停车离开",
-                "事故后司机驾车逃逸",
+                "This is a photo of a vehicle fleeing the scene after a traffic accident",
+                "This is a photo of a hit-and-run accident with the car driving away",
+                "This is a photo of a driver leaving the accident scene without stopping",
+                "This is a photo of a vehicle escaping after hitting another car",
             ],
         }
     )
@@ -762,6 +783,18 @@ class BatchProcessConfig:
 
 
 @dataclass
+class AccidentRAGConfig:
+    """Image RAG — 视觉样本检索注入配置（Phase B, Unleashing VLMs arXiv:2601.10551）"""
+
+    enabled: bool = False                         # 默认关闭；人工确认 exemplar 帧后设为 True
+    exemplars_dir: str = "data/accident_exemplars"  # 已确认 TP 事故关键帧目录
+    top_k: int = 2                                # 每次注入的样本帧数
+    # 注入图片的压缩参数（小图减少 token 消耗）
+    max_width: int = 640
+    quality: int = 75
+
+
+@dataclass
 class TrafficVLMConfig:
     """整体配置聚合。"""
 
@@ -784,6 +817,7 @@ class TrafficVLMConfig:
     progressive_vlm: ProgressiveVLMConfig = field(default_factory=ProgressiveVLMConfig)
     stage3: Stage3Config = field(default_factory=Stage3Config)
     narrative_sidecar: NarrativeSidecarConfig = field(default_factory=NarrativeSidecarConfig)
+    accident_rag: AccidentRAGConfig = field(default_factory=AccidentRAGConfig)
 
     def ensure_dirs(self):
         self.datastore.ensure_dirs()

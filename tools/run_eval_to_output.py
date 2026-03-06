@@ -44,6 +44,40 @@ def main():
                         help='非事故数据集目录 (默认: uploads/非交通事故数据集)')
     parser.add_argument('--subset', type=int, default=0,
                         help='每类随机采样数量 (0=全量)')
+    parser.add_argument('--ablation-skip-siglip', action='store_true',
+                        help='消融测试：跳过SigLIP编码和检索')
+    parser.add_argument('--model', type=str, default=None,
+                        help='VLM模型名 (如 qwen3-vl-8b-instruct)')
+    parser.add_argument('--reuse-preprocess', type=str, default=None,
+                        help='复用预处理缓存的源base_dir (如 data)')
+    # 消融 v2 参数
+    parser.add_argument('--ablation-skip-metadata', action='store_true',
+                        help='消融测试：不传 metadata_text 给 VLM')
+    parser.add_argument('--ablation-disable-yolo', action='store_true',
+                        help='消融测试：禁用 YOLO 检测+跟踪')
+    parser.add_argument('--ablation-force-uniform', action='store_true',
+                        help='消融测试：强制均匀帧选择（替代信号驱动选帧）')
+    parser.add_argument('--ablation-skip-mog2', action='store_true',
+                        help='消融测试：跳过 MOG2 运动检测')
+    parser.add_argument('--ablation-suppress-motion-peak', action='store_true',
+                        help='方案A：压制 motion_peak 选帧信号（权重清零），保留其他信号')
+    parser.add_argument('--enable-accident-rag', action='store_true',
+                        help='Phase B: 开启 Image RAG 视觉样本注入（需先确认 data/accident_exemplars/ 帧内容）')
+    parser.add_argument('--accident-rag-dir', type=str, default=None,
+                        help='Image RAG exemplar 目录（默认 data/accident_exemplars）')
+    parser.add_argument('--accident-rag-top-k', type=int, default=2,
+                        help='每次注入的 exemplar 帧数（默认 2）')
+    parser.add_argument('--vllm-url', type=str, default=None,
+                        help='本地 vLLM 端点 URL（如 http://100.105.223.57:8000/v1），覆盖 VLLM_BASE_URL 环境变量')
+    # 数据集处理参数
+    parser.add_argument('--acc-exclude-subdir', type=str, action='append', default=[],
+                        help='从事故目录中排除的子目录名（可多次指定）')
+    parser.add_argument('--extra-nonacc-dir', type=str, action='append', default=[],
+                        help='额外的非事故数据目录（可多次指定）')
+    parser.add_argument('--shard-id', type=int, default=None,
+                        help='分片ID（从0开始），需配合 --num-shards 使用')
+    parser.add_argument('--num-shards', type=int, default=None,
+                        help='总分片数，用于多进程并行评测')
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -88,9 +122,62 @@ def main():
         "narrative_trigger_post_event": args.narrative_trigger_post_event,
     }
 
+    # 消融测试配置
+    if args.ablation_skip_siglip:
+        config["ablation_skip_siglip"] = True
+        print(f"  [消融] 跳过SigLIP: 启用")
+    if args.ablation_skip_metadata:
+        config["ablation_skip_metadata"] = True
+        print(f"  [消融] 跳过Metadata文本: 启用")
+    if args.ablation_disable_yolo:
+        config["ablation_disable_yolo"] = True
+        print(f"  [消融] 禁用YOLO检测: 启用")
+    if args.ablation_force_uniform:
+        config["ablation_force_uniform"] = True
+        print(f"  [消融] 强制均匀帧选择: 启用")
+    if args.ablation_skip_mog2:
+        config["ablation_skip_mog2"] = True
+        print(f"  [消融] 跳过MOG2运动检测: 启用")
+    if args.ablation_suppress_motion_peak:
+        config["ablation_suppress_motion_peak"] = True
+        print(f"  [方案A] 压制motion_peak信号: 启用")
+
+    # VLM模型切换
+    if args.model:
+        config["model"] = args.model
+        print(f"  VLM模型: {args.model}")
+
+    # 预处理缓存复用
+    if args.reuse_preprocess:
+        config["reuse_preprocess_dir"] = args.reuse_preprocess
+        print(f"  复用预处理: {args.reuse_preprocess}")
+
+    # Phase B: Image RAG
+    if args.enable_accident_rag:
+        config["accident_rag_enabled"] = True
+        config["accident_rag_top_k"] = args.accident_rag_top_k
+        if args.accident_rag_dir:
+            config["accident_rag_exemplars_dir"] = args.accident_rag_dir
+        print(f"  [Phase B] Image RAG: 启用 (top_k={args.accident_rag_top_k})")
+
+    # vLLM 端点覆盖（优先级高于 VLLM_BASE_URL 环境变量）
+    if args.vllm_url:
+        os.environ["VLLM_BASE_URL"] = args.vllm_url
+        print(f"  vLLM端点: {args.vllm_url}")
+
+    # 中间数据隔离：存到 output_dir/data/ 下，避免不同模型互相覆盖
+    data_base_dir = os.path.join(output_dir, "data")
+    config["base_dir"] = data_base_dir
+    print(f"  中间数据目录: {data_base_dir}")
+
     # 数据集路径
     acc_dir = args.acc_dir or "D:/project2025/qwen235b/uploads/事故数据集"
     nonacc_dir = args.nonacc_dir or "D:/project2025/qwen235b/uploads/非交通事故数据集"
+
+    if args.acc_exclude_subdir:
+        print(f"  事故目录排除子目录: {args.acc_exclude_subdir}")
+    if args.extra_nonacc_dir:
+        print(f"  额外非事故目录: {args.extra_nonacc_dir}")
 
     # 创建评测器
     evaluator = Evaluator(
@@ -101,6 +188,10 @@ def main():
         subset_per_class=args.subset,  # 0=全量, >0=随机采样
         seed=42,
         dump_video_results=args.dump_video_results,
+        acc_exclude_subdirs=args.acc_exclude_subdir,
+        extra_nonacc_dirs=args.extra_nonacc_dir,
+        shard_id=args.shard_id,
+        num_shards=args.num_shards,
     )
 
     # 运行评测

@@ -134,7 +134,7 @@ class KeyframeSelector:
             # 1. 运动峰值：计算bbox位移
             motion_score = self._compute_motion_score(fidx, frame_centers)
             signal.motion_score = motion_score
-            if motion_score > 0.5:
+            if motion_score > 0.5 and not self.config.ablation_suppress_motion_peak:
                 signal.reason_tags.append("motion_peak")
 
             # 2. 交互峰值：计算目标间最小距离
@@ -160,8 +160,12 @@ class KeyframeSelector:
                 signal.reason_tags.append("post_event_cue")
 
             # 综合分数（加权）
+            effective_motion_weight = (
+                0.0 if self.config.ablation_suppress_motion_peak
+                else self.config.motion_peak_weight
+            )
             signal.combined_score = (
-                self.config.motion_peak_weight * motion_score +
+                effective_motion_weight * motion_score +
                 self.config.interaction_peak_weight * interaction_score +
                 self.config.trajectory_break_weight * break_score +
                 self.config.post_event_cue_weight * post_score

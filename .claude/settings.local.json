@@ -1,27 +1,26 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:modelscope.cn)",
+      "Bash(ffprobe:*)",
+      "Bash(taskkill:*)",
+      "Skill(frontend-design)",
+      "Bash(start \"\" \"D:\\\\project2025\\\\qwen235b\\\\docs\\\\architecture_diagram.html\")",
       "WebSearch",
+      "Skill(pptx)",
+      "Bash(node create_pptx.js:*)",
       "Bash(dir:*)",
-      "Bash(python test:*)",
-      "Bash(pip install:*)",
-      "Bash(python:*)",
-      "Bash(.venvScriptsactivate)",
-      "Bash(./venv/Scripts/pip install flask openai)",
-      "Bash(./venv/Scripts/pip list)",
-      "Bash(./venv/Scripts/python:*)",
-      "Bash(ffmpeg:*)",
-      "Bash(choco install:*)",
-      "Bash(where choco)",
-      "Bash(where:*)",
-      "Bash(.\\venv\\Scripts\\python:*)",
-      "Bash(findstr:*)",
-      "Bash(nvidia-smi:*)",
-      "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git log:*)",
+      "Bash(d:/project2025/qwen235b/venv/Scripts/python.exe:*)",
+      "Bash(ssh:*)",
+      "Bash(pandoc:*)",
+      "Bash(for i in 1 2 3)",
+      "Bash(do)",
+      "Bash(echo:*)",
+      "Bash(break)",
+      "Bash(done)"
     ],
-    "deny": [],
-    "ask": []
+    "additionalDirectories": [
+      "d:\\project2025\\qwen235b"
+    ]
   }
 }

@@ -19,6 +19,7 @@ class VideoTask:
     trace_id: str
     seg_end_ts: int = None  # 可选字段
     created_at: float = None
+    analysis_type: str = "accident"  # 新增: 分析类型 (accident/mv_violation/ebike_violation/ads_behavior)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -29,12 +30,59 @@ class VideoTask:
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> "VideoTask":
+        seg_end_ts_raw = data.get("seg_end_ts")
+        seg_end_ts = None
+        if seg_end_ts_raw and seg_end_ts_raw not in ("None", "null", ""):
+            seg_end_ts = int(seg_end_ts_raw)
         return cls(
             job_id=data["job_id"],
             camera_id=data["camera_id"],
             window_path=data["window_path"],
-            seg_end_ts=int(data["seg_end_ts"]) if data.get("seg_end_ts") else None,
+            seg_end_ts=seg_end_ts,
             trace_id=data["trace_id"],
+            created_at=float(data.get("created_at", time.time())),
+            analysis_type=data.get("analysis_type", "accident")  # 默认为事故检测
+        )
+
+
+@dataclass
+class EdgeEvent:
+    """edge_events 消息结构 - 边缘触发事件"""
+    camera_id: str
+    timestamp: int  # Unix timestamp
+    similarity_score: float
+    keyframe_count: int
+    keyframes_base64: List[str]  # 关键帧 base64 编码
+    window_path: str
+    trigger_time: str  # ISO 格式时间
+    trace_id: str = ""
+    created_at: float = None
+
+    def __post_init__(self):
+        if self.created_at is None:
+            self.created_at = time.time()
+        if not self.trace_id:
+            self.trace_id = f"{self.camera_id}_{self.timestamp}"
+
+    def to_dict(self) -> Dict[str, str]:
+        d = asdict(self)
+        d["keyframes_base64"] = json.dumps(d["keyframes_base64"])  # JSON 序列化列表
+        return {k: str(v) for k, v in d.items()}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, str]) -> "EdgeEvent":
+        keyframes = data.get("keyframes_base64", "[]")
+        if isinstance(keyframes, str):
+            keyframes = json.loads(keyframes)
+        return cls(
+            camera_id=data["camera_id"],
+            timestamp=int(data["timestamp"]),
+            similarity_score=float(data["similarity_score"]),
+            keyframe_count=int(data["keyframe_count"]),
+            keyframes_base64=keyframes,
+            window_path=data["window_path"],
+            trigger_time=data["trigger_time"],
+            trace_id=data.get("trace_id", ""),
             created_at=float(data.get("created_at", time.time()))
         )
 
@@ -51,6 +99,11 @@ class ResultTask:
     is_accident: bool
     seg_end_ts: int = None  # 可选字段
     created_at: float = None
+    analysis_type: str = "accident"  # 新增: 分析类型
+    is_positive: bool = False  # 新增: 通用阳性标志（违法/事故/异常行为）
+    violation_type: str = None  # 新增: 违法类型 (用于 mv_violation/ebike_violation)
+    behavior_type: str = None  # 新增: 行为类型 (用于 ads_behavior)
+    processing_time_sec: float = 0.0  # 实际处理耗时(秒)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -59,6 +112,7 @@ class ResultTask:
     def to_dict(self) -> Dict[str, str]:
         d = asdict(self)
         d["is_accident"] = "1" if self.is_accident else "0"
+        d["is_positive"] = "1" if self.is_positive else "0"
         return {k: str(v) for k, v in d.items()}
 
     @classmethod
@@ -71,7 +125,12 @@ class ResultTask:
             result_path=data["result_path"],
             trace_id=data["trace_id"],
             is_accident=data.get("is_accident", "0") == "1",
-            created_at=float(data.get("created_at", time.time()))
+            created_at=float(data.get("created_at", time.time())),
+            analysis_type=data.get("analysis_type", "accident"),
+            is_positive=data.get("is_positive", "0") == "1",
+            violation_type=data.get("violation_type") if data.get("violation_type") != "None" else None,
+            behavior_type=data.get("behavior_type") if data.get("behavior_type") != "None" else None,
+            processing_time_sec=float(data.get("processing_time_sec", 0.0)),
         )
 
 
@@ -80,9 +139,10 @@ class RedisStreamClient:
 
     STREAM_VIDEO_TASKS = "video_tasks"
     STREAM_RESULT_TASKS = "result_tasks"
+    STREAM_EDGE_EVENTS = "edge_events"  # 边缘触发事件队列
     STREAM_DLQ = "dlq_tasks"
 
-    MAX_STREAM_LEN = 10000
+    MAX_STREAM_LEN = 0  # 0 = no limit
     STATUS_TTL = 7 * 24 * 3600  # 7 days
 
     def __init__(
@@ -125,7 +185,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_VIDEO_TASKS,
             task.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         # 更新任务状态
         self.set_task_status(task.job_id, "pending")
@@ -177,6 +237,27 @@ class RedisStreamClient:
         """确认视频任务处理完成"""
         self.client.xack(self.STREAM_VIDEO_TASKS, group, msg_id)
 
+    def delete_consumer(self, stream: str, group: str, consumer: str) -> int:
+        """删除消费者（优雅退出时清理）
+
+        Args:
+            stream: Stream 名称
+            group: Consumer Group 名称
+            consumer: Consumer 名称
+
+        Returns:
+            删除的 pending 消息数量
+        """
+        try:
+            return self.client.xgroup_delconsumer(stream, group, consumer)
+        except Exception as e:
+            # 如果删除失败（如消费者不存在），忽略错误
+            return 0
+
+    def delete_video_consumer(self, group: str, consumer: str) -> int:
+        """删除 video_tasks 的消费者"""
+        return self.delete_consumer(self.STREAM_VIDEO_TASKS, group, consumer)
+
     # === result_tasks 操作 ===
 
     def add_result_task(self, task: ResultTask) -> str:
@@ -184,7 +265,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_RESULT_TASKS,
             task.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         return msg_id
 
@@ -215,6 +296,55 @@ class RedisStreamClient:
     def ack_result_task(self, group: str, msg_id: str):
         """确认结果任务处理完成"""
         self.client.xack(self.STREAM_RESULT_TASKS, group, msg_id)
+
+    # === edge_events 操作 ===
+
+    def add_edge_event(self, event: EdgeEvent) -> str:
+        """添加边缘触发事件到队列"""
+        msg_id = self.client.xadd(
+            self.STREAM_EDGE_EVENTS,
+            event.to_dict(),
+            maxlen=self.MAX_STREAM_LEN or None
+        )
+        return msg_id
+
+    def read_edge_events(
+        self,
+        group: str,
+        consumer: str,
+        count: int = 1,
+        block: int = 5000
+    ) -> List[tuple]:
+        """读取边缘触发事件"""
+        self.ensure_consumer_group(self.STREAM_EDGE_EVENTS, group)
+        # 先尝试读取pending消息
+        result = self.client.xreadgroup(
+            group,
+            consumer,
+            {self.STREAM_EDGE_EVENTS: "0"},
+            count=count,
+            block=0
+        )
+        # 如果没有pending，再读新消息
+        if not result or not result[0][1]:
+            result = self.client.xreadgroup(
+                group,
+                consumer,
+                {self.STREAM_EDGE_EVENTS: ">"},
+                count=count,
+                block=block
+            )
+        if not result:
+            return []
+        tasks = []
+        for stream_name, messages in result:
+            for msg_id, data in messages:
+                tasks.append((msg_id, EdgeEvent.from_dict(data)))
+        return tasks
+
+    def ack_edge_event(self, group: str, msg_id: str):
+        """确认边缘事件处理完成"""
+        self.client.xack(self.STREAM_EDGE_EVENTS, group, msg_id)
 
     # === 任务状态管理 ===
 

@@ -1,4 +1,5 @@
-# Embedding Service Deployment - SigLIP (1×T4 GPU 整卡隔离)
+# Embedding Service Deployment - SigLIP (3×T4 GPU 水平扩展)
+# 每个 Pod 使用 1 个 GPU，K8S Service 自动负载均衡
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,7 +20,7 @@ metadata:
   labels:
     app: embedding-service
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: embedding-service
@@ -30,11 +31,14 @@ spec:
     spec:
       containers:
       - name: embedding
-        image: localhost:5000/embedding-service:latest
+        image: localhost:5000/embedding-service:v17
         ports:
         - containerPort: 8080
           name: http
         env:
+        # 使用 GPU 0-3，vLLM 固定使用 GPU 6,7
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0,1,2,3"
         - name: REDIS_HOST
           value: "redis.traffic-vlm.svc.cluster.local"
         - name: REDIS_PORT
@@ -68,11 +72,11 @@ spec:
           requests:
             cpu: "2"
             memory: "8Gi"
-            nvidia.com/gpu: "1"
+            # 不使用 nvidia.com/gpu，避免 Device Plugin 随机分配到 vLLM 的 GPU 4-7
+            # 靠 CUDA_VISIBLE_DEVICES=0,1,2,3 控制 GPU 选择
           limits:
             cpu: "4"
             memory: "16Gi"
-            nvidia.com/gpu: "1"
         volumeMounts:
         - name: models
           mountPath: /models
@@ -111,7 +115,7 @@ spec:
     targetPort: 8080
     name: http
 ---
-# HPA for Embedding Service (可扩展到 3 个实例)
+# HPA 自动伸缩 - 根据CPU使用率在1-4个Pod之间自动调整
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -123,7 +127,7 @@ spec:
     kind: Deployment
     name: embedding-service
   minReplicas: 1
-  maxReplicas: 3
+  maxReplicas: 4
   metrics:
   - type: Resource
     resource:

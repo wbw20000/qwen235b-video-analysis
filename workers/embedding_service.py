@@ -50,10 +50,13 @@ class EmbeddingModel:
         log.info(f"加载模型: {self.model_path}")
         log.info(f"transformers 版本: {transformers.__version__}")
 
-        # 选择设备
+        # 选择设备 (根据 HOSTNAME 哈希自动分散到不同 GPU)
         if torch.cuda.is_available():
-            self.device = torch.device("cuda:0")
-            log.info(f"使用 GPU: {torch.cuda.get_device_name(0)}")
+            gpu_count = torch.cuda.device_count()
+            hostname = os.getenv("HOSTNAME", "0")
+            gpu_id = hash(hostname) % gpu_count
+            self.device = torch.device(f"cuda:{gpu_id}")
+            log.info(f"使用 GPU:{gpu_id}/{gpu_count} ({torch.cuda.get_device_name(gpu_id)}) [host={hostname}]")
         else:
             self.device = torch.device("cpu")
             log.warning("GPU 不可用，使用 CPU")

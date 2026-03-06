@@ -1,5 +1,5 @@
-# Semantic Analyzer 镜像 (CPU - 唯一编排者)
-FROM traffic-vlm-base:latest
+# Semantic Analyzer 镜像 (CUDA MOG2 + FFmpeg NVDEC)
+FROM opencv-cuda-base:latest
 
 LABEL service="semantic-analyzer"
 LABEL description="Semantic Analyzer - the sole orchestrator"

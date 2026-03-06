@@ -1,0 +1,493 @@
+# PreProcessor Deployment (共享预处理服务)
+# GPU 0-3, 6-7 轮询分配，每 GPU 3 个 Pod
+# 功能: FFmpeg NVDEC + CUDA MOG2 + SigLIP Embedding
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessor-g0
+  namespace: traffic-vlm
+  labels:
+    app: preprocessor
+    cuda-device: "0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: preprocessor
+      cuda-device: "0"
+  template:
+    metadata:
+      labels:
+        app: preprocessor
+        cuda-device: "0"
+    spec:
+      containers:
+      - name: preprocessor
+        image: localhost:5000/preprocessor:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "500"
+        - name: CACHE_TTL
+          value: "300"
+        - name: SIGLIP_MODEL_PATH
+          value: "/data/models/siglip-base-patch16-384"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+        - name: frames
+          mountPath: /data1/frames
+        - name: models
+          mountPath: /data/models
+          readOnly: true
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: frames
+        persistentVolumeClaim:
+          claimName: pvc-frames
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+---
+# PreProcessor GPU 1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessor-g1
+  namespace: traffic-vlm
+  labels:
+    app: preprocessor
+    cuda-device: "1"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: preprocessor
+      cuda-device: "1"
+  template:
+    metadata:
+      labels:
+        app: preprocessor
+        cuda-device: "1"
+    spec:
+      containers:
+      - name: preprocessor
+        image: localhost:5000/preprocessor:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "500"
+        - name: CACHE_TTL
+          value: "300"
+        - name: SIGLIP_MODEL_PATH
+          value: "/data/models/siglip-base-patch16-384"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "1"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+        - name: frames
+          mountPath: /data1/frames
+        - name: models
+          mountPath: /data/models
+          readOnly: true
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: frames
+        persistentVolumeClaim:
+          claimName: pvc-frames
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+---
+# PreProcessor GPU 2
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessor-g2
+  namespace: traffic-vlm
+  labels:
+    app: preprocessor
+    cuda-device: "2"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: preprocessor
+      cuda-device: "2"
+  template:
+    metadata:
+      labels:
+        app: preprocessor
+        cuda-device: "2"
+    spec:
+      containers:
+      - name: preprocessor
+        image: localhost:5000/preprocessor:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "500"
+        - name: CACHE_TTL
+          value: "300"
+        - name: SIGLIP_MODEL_PATH
+          value: "/data/models/siglip-base-patch16-384"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "2"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+        - name: frames
+          mountPath: /data1/frames
+        - name: models
+          mountPath: /data/models
+          readOnly: true
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: frames
+        persistentVolumeClaim:
+          claimName: pvc-frames
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+---
+# PreProcessor GPU 3
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessor-g3
+  namespace: traffic-vlm
+  labels:
+    app: preprocessor
+    cuda-device: "3"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: preprocessor
+      cuda-device: "3"
+  template:
+    metadata:
+      labels:
+        app: preprocessor
+        cuda-device: "3"
+    spec:
+      containers:
+      - name: preprocessor
+        image: localhost:5000/preprocessor:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "500"
+        - name: CACHE_TTL
+          value: "300"
+        - name: SIGLIP_MODEL_PATH
+          value: "/data/models/siglip-base-patch16-384"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "3"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+        - name: frames
+          mountPath: /data1/frames
+        - name: models
+          mountPath: /data/models
+          readOnly: true
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: frames
+        persistentVolumeClaim:
+          claimName: pvc-frames
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+---
+# PreProcessor GPU 6
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessor-g6
+  namespace: traffic-vlm
+  labels:
+    app: preprocessor
+    cuda-device: "6"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: preprocessor
+      cuda-device: "6"
+  template:
+    metadata:
+      labels:
+        app: preprocessor
+        cuda-device: "6"
+    spec:
+      containers:
+      - name: preprocessor
+        image: localhost:5000/preprocessor:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "500"
+        - name: CACHE_TTL
+          value: "300"
+        - name: SIGLIP_MODEL_PATH
+          value: "/data/models/siglip-base-patch16-384"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "6"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+        - name: frames
+          mountPath: /data1/frames
+        - name: models
+          mountPath: /data/models
+          readOnly: true
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: frames
+        persistentVolumeClaim:
+          claimName: pvc-frames
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models
+---
+# PreProcessor GPU 7
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessor-g7
+  namespace: traffic-vlm
+  labels:
+    app: preprocessor
+    cuda-device: "7"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: preprocessor
+      cuda-device: "7"
+  template:
+    metadata:
+      labels:
+        app: preprocessor
+        cuda-device: "7"
+    spec:
+      containers:
+      - name: preprocessor
+        image: localhost:5000/preprocessor:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "500"
+        - name: CACHE_TTL
+          value: "300"
+        - name: SIGLIP_MODEL_PATH
+          value: "/data/models/siglip-base-patch16-384"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "7"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+        - name: frames
+          mountPath: /data1/frames
+        - name: models
+          mountPath: /data/models
+          readOnly: true
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
+      - name: frames
+        persistentVolumeClaim:
+          claimName: pvc-frames
+      - name: models
+        persistentVolumeClaim:
+          claimName: pvc-models

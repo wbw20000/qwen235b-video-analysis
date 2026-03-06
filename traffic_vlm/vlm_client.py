@@ -34,25 +34,48 @@ def _safe_print(*args, **kwargs):
 
 def _extract_json_from_markdown(text: str) -> str:
     """
-    从markdown代码块中提取JSON内容
+    从markdown代码块或自由文本中提取JSON内容
 
-    VLM有时会返回被markdown代码块包裹的JSON：
-    ```json
-    {"key": "value"}
-    ```
-
-    此函数去除包裹，返回纯JSON字符串
+    支持以下格式：
+    1. ```json { ... } ``` — markdown代码块
+    2. <think>...</think> { ... } — thinking模型带标签
+    3. 思考文本... { ... } — thinking模型无标签（如Qwen3.5）
     """
     if not text:
         return text
 
     text = text.strip()
 
-    # 匹配 ```json ... ``` 或 ``` ... ```
+    # 剥离 thinking 模型的 <think>...</think> 标签
+    think_pattern = r'<think>.*?</think>'
+    text = re.sub(think_pattern, '', text, flags=re.DOTALL).strip()
+
+    # 方法1: 匹配 ```json ... ``` 或 ``` ... ```
     pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
     match = re.search(pattern, text, re.DOTALL)
     if match:
         return match.group(1).strip()
+
+    # 方法2: 文本本身就是纯JSON（以 { 开头）
+    if text.startswith('{'):
+        return text
+
+    # 方法3: 从自由文本中提取最后一个完整JSON块
+    # （适用于thinking模型输出: 思考文本 + JSON）
+    last_brace = text.rfind('}')
+    if last_brace >= 0:
+        depth = 0
+        for i in range(last_brace, -1, -1):
+            if text[i] == '}':
+                depth += 1
+            elif text[i] == '{':
+                depth -= 1
+            if depth == 0:
+                candidate = text[i:last_brace + 1]
+                # 快速验证：至少包含一个JSON键值对
+                if '"' in candidate:
+                    return candidate
+                break
 
     return text
 
@@ -185,6 +208,12 @@ ACCIDENT_SYSTEM_PROMPT = """
     · 交警/救援人员正在现场处理
     · 三角警示牌、警示锥桶
   - 这是"事故后果片段"，需要补充更早的画面才能确认完整过程
+  ⭐【远距离/俯视摄像机下的后果表现（目标较小时）】
+  - 路面出现静止小目标（可能是倒地人员或脱落部件）
+  - 正常车流中一辆/多辆长时间停车（非信号灯原因）
+  - 事故区域后续车辆普遍绕行或减速
+  - 监控画面角落可见警灯闪烁（蓝/红光点）
+  → 上述情况 + 视角无法追溯碰撞过程 → POST_EVENT_ONLY（不是NO）
 
 **verdict = "UNCERTAIN"**（不确定，需人工复核）
   以下情况必须选择UNCERTAIN：
@@ -193,6 +222,12 @@ ACCIDENT_SYSTEM_PROMPT = """
   - 目标位置非常接近但碰撞瞬间不在画面中
   - 有异常停留但原因不明
   - 证据不充分，无法做出判断
+  ⭐【软性证据触发（有以下任一时，应选 UNCERTAIN 而非 NO）】
+  - 元数据显示两目标最近距离 < 80px，且至少一方随后出现静止或骤减速
+  - 元数据中出现 interaction_peak 标记，且视角受限（俯视/远景）无法完整观察
+  - 视频来自路侧摄像机（文件名含 RoadsideCamera），且两目标轨迹在同一帧位置重叠
+  - 任一目标在非交叉路口停车线处突然停车超过 3 秒
+  💡 漏报真实事故的代价远高于报告疑似事故，不确定时选 UNCERTAIN 而非 NO。
 
 **verdict = "NO"**（确认无事故）
   必须同时满足：
@@ -519,6 +554,17 @@ def _build_api_params(config, messages):
         api_params['top_p'] = config.top_p
     if hasattr(config, 'max_tokens'):
         api_params['max_tokens'] = config.max_tokens
+    # Qwen3.5 thinking 模型：关闭思维链，直接输出 JSON
+    if '3.5' in config.model or 'qwen3.5' in config.model.lower():
+        is_local_vllm = bool(os.getenv("VLLM_BASE_URL"))
+        if is_local_vllm:
+            # vLLM 本地部署：通过 chat_template_kwargs 禁用思维链
+            api_params['extra_body'] = {
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
+        else:
+            # DashScope 云端：直接传 enable_thinking=False
+            api_params['extra_body'] = {"enable_thinking": False}
     return api_params
 
 
@@ -543,6 +589,19 @@ class VLMClient:
         self.async_client = AsyncOpenAI(api_key=key, base_url=base_url)
         self.config = config
         self._using_local_vllm = bool(vllm_base_url)
+
+        # Image RAG — 懒加载（仅当 accident_rag_enabled=True 时初始化）
+        self._rag_db = None
+        if getattr(config, "accident_rag_enabled", False):
+            try:
+                from .accident_rag import AccidentRAGDatabase
+                self._rag_db = AccidentRAGDatabase(
+                    exemplars_dir=getattr(config, "accident_rag_exemplars_dir", "data/accident_exemplars")
+                )
+                _safe_print(f"[ImageRAG] 已加载 exemplar 库: {self._rag_db.stats()}")
+            except Exception as e:
+                _safe_print(f"[ImageRAG] 初始化失败，跳过: {e}")
+                self._rag_db = None
 
     def build_user_prompt(
         self,
@@ -737,7 +796,7 @@ class VLMClient:
 - 车辆位置靠近但无碰撞证据 ≠ 事故
 - 正常通过路口的车流 ≠ 事故
 
-⚠️ 没有硬性证据时，请不要报告为事故。准确性优先！
+⚠️ 路侧摄像机或远距离场景中，若轨迹数据显示异常但视觉证据不充分，请选 UNCERTAIN 而非 NO。漏报真实事故的代价高于报告疑似事故。
 
 【目标ID使用说明】⭐⭐⭐（必须严格遵守）
 - 每张图片上的绿色检测框左上角都有"ID:X"标签（白色文字黑色背景）
@@ -1026,6 +1085,12 @@ class VLMClient:
   适用场景：
   - 未看到碰撞/接触的瞬间
   - 但看到明确的事故后果：人员倒地、车辆受损、碎片散落、救援现场
+  ⭐【远距离/俯视摄像机下的事故后果表现（目标较小时也适用）】
+  - 路面出现静止的"小目标"（可能是倒地人员或脱落部件）
+  - 正常车流中出现一辆/多辆长时间停车（非信号灯原因）
+  - 事故区域后续车辆明显绕行或减速让行
+  - 监控画面角落可见警灯闪烁（蓝/红光点）
+  → 上述情况 + 视角无法追溯碰撞过程 → POST_EVENT_ONLY（不是NO）
 
 **verdict = "UNCERTAIN"**（不确定，需人工复核）
   以下情况必须选择UNCERTAIN：
@@ -1033,6 +1098,12 @@ class VLMClient:
   - 看起来有危险但无法确认是否发生接触
   - 目标位置非常接近但碰撞瞬间不在画面中
   - 证据不充分，无法做出判断
+  ⭐【软性证据触发（有以下任一时，应选 UNCERTAIN 而非 NO）】
+  - 元数据显示两目标最近距离 < 80px，且至少一方随后出现静止或骤减速
+  - 元数据中出现 interaction_peak 标记，且视角受限（俯视/远景）无法完整观察
+  - 视频来自路侧摄像机（文件名含 RoadsideCamera 或 RC_），且两目标轨迹在同一帧出现位置重叠
+  - 任一目标在非交叉路口停车线处突然停车超过 3 秒
+  💡 原则：漏报真实事故的代价远高于报告疑似事故，不确定时选 UNCERTAIN 而非 NO。
 
 **verdict = "NO"**（确认无事故）
   必须同时满足：
@@ -1042,7 +1113,7 @@ class VLMClient:
 
 ⚠️ **重要**：
 - 结合元数据中的距离信息和轨迹变化来辅助判断
-- 元数据中"最近距离"小于50像素时需特别关注
+- 元数据中"最近距离"小于80像素时需特别关注
 - 轨迹突然中断可能意味着碰撞发生
 
 **🔴 物理接触优先检测规则**：
@@ -1064,6 +1135,45 @@ class VLMClient:
 }
 """
 
+    # 场景文本RAG：按摄像机类型定义事故视觉模式（Text RAG - Unleashing VLMs §3.2）
+    _CAMERA_PATTERNS = {
+        "roadside": {
+            "desc": "路侧摄像机（俯视/斜视角，目标较小，距离较远）",
+            "patterns": [
+                "两小目标快速接近后，其中一方突然静止（非路口等红灯）",
+                "目标轨迹出现骤折点：方向或速度突然变化",
+                "后续车辆在某区域明显绕行或减速让行",
+                "目标停在车道中央或路口非正常停车位置",
+                "画面中出现人员下车或聚集行为",
+            ],
+        },
+        "elec_police": {
+            "desc": "道路定点电警摄像机（平视或轻微俯角，目标中等大小）",
+            "patterns": [
+                "两车在交叉区域出现短暂位置重叠或极近距离（bbox重叠）",
+                "碰撞后一方目标轨迹出现明显偏转或停止",
+                "事故区域后续出现人员下车检查/聚集行为",
+                "二轮车与机动车接触后出现倒地或姿态突变",
+                "碰撞方向角度明显异常（非正常行驶方向）",
+            ],
+        },
+    }
+
+    @staticmethod
+    def _detect_camera_type(clip_info: Optional[Dict]) -> str:
+        """从clip_info的video_path推断摄像机类型"""
+        if not clip_info:
+            return "unknown"
+        video_path = str(clip_info.get('video_path', '') or clip_info.get('path', ''))
+        fname = os.path.basename(video_path).lower()
+        if 'roadsidecamera' in fname or fname.startswith('rc_') or fname.startswith('rc.') or '_rc.' in fname or '_rc_' in fname:
+            return "roadside"
+        # 电警摄像机：文件名含 数字-数字 模式（如 25-101, 460-202）
+        import re as _re
+        if _re.match(r'^\d{2,3}-\d{3}', fname):
+            return "elec_police"
+        return "unknown"
+
     def build_progressive_user_prompt(
         self,
         metadata_text: str,
@@ -1074,6 +1184,9 @@ class VLMClient:
 
         clip_time_info = ""
         short_video_hint = ""
+        camera_hint = ""
+        sparse_clips_hint = ""
+
         if clip_info:
             clip_duration = clip_info.get('duration', 0)
             clip_start = clip_info.get('start_time', 0)
@@ -1084,15 +1197,35 @@ class VLMClient:
 - 片段起始时间（原视频）: {clip_start:.1f}秒
 - 片段结束时间（原视频）: {clip_end:.1f}秒
 """
-            # v2: 短视频提示句
+            # 短视频提示（≤15s）
             if clip_duration <= 15.0:
                 short_video_hint = """
 ⚠️ **短视频特别提示**：这是一段短视频(<15秒)，需要更仔细检查每一帧的细节变化，特别关注画面中交通参与者之间的接触瞬间。短视频中事故发生快，请逐帧仔细观察。
+"""
+            # 少clips保护：从clip_info读取total_clips（pipeline已注入）
+            total_clips = clip_info.get('total_clips')
+            if total_clips is not None and total_clips <= 3:
+                sparse_clips_hint = f"""
+⚠️ **关键提示（少片段视频）**：本视频仅提取到 {total_clips} 个候选片段，碰撞过程可能仅出现在某一帧中。请对每一帧进行最仔细的逐像素检查，不能因"大部分帧正常"就判NO。任意一帧存在碰撞迹象 → 判 UNCERTAIN 或 YES。
+"""
+
+        # Text RAG：摄像机类型自适应提示（Unleashing VLMs 双模态RAG文本端）
+        cam_type = self._detect_camera_type(clip_info)
+        if cam_type in self._CAMERA_PATTERNS:
+            cam_info = self._CAMERA_PATTERNS[cam_type]
+            pattern_lines = "\n".join(f"  - {p}" for p in cam_info["patterns"])
+            camera_hint = f"""
+【摄像机场景提示 - {cam_info["desc"]}】
+在此类摄像机视角下，交通事故的典型视觉特征：
+{pattern_lines}
+→ 上述任一特征出现时，请综合轨迹元数据判断，不确定时选 UNCERTAIN 而非 NO。
 """
 
         return f"""
 {clip_time_info}
 {short_video_hint}
+{camera_hint}
+{sparse_clips_hint}
 {metadata_text}
 
 ## 用户检索意图
@@ -1104,7 +1237,7 @@ class VLMClient:
 1. 仔细观察图片中的车辆和行人位置、姿态
 2. 参考元数据中的"最近距离"和"轨迹摘要"信息
 3. 关注元数据中标记的 motion_peak、interaction_peak 帧
-4. 如果"最近距离"<50像素，需特别仔细查看该帧
+4. 如果"最近距离"<80像素，需特别仔细查看该帧
 
 请严格按JSON格式输出分析结果。
 """
@@ -1135,6 +1268,30 @@ class VLMClient:
         )
 
         contents: List[Dict] = [{"type": "text", "text": user_prompt}]
+
+        # Image RAG — 在视频帧前注入已确认事故参考样本（Unleashing VLMs arXiv:2601.10551）
+        if self._rag_db is not None and self._rag_db.is_ready():
+            cam_type = self._detect_camera_type(clip_info)
+            top_k = getattr(self.config, "accident_rag_top_k", 2)
+            exemplar_paths = self._rag_db.retrieve(cam_type=cam_type, top_k=top_k)
+            if exemplar_paths:
+                contents.append({
+                    "type": "text",
+                    "text": (
+                        "【已确认事故参考样本（仅供视觉对比，不代表本视频一定有事故）】\n"
+                        f"以下 {len(exemplar_paths)} 张图片来自已确认的真实事故视频（{cam_type} 类摄像机），"
+                        "请对比本视频帧，识别类似的视觉模式：\n"
+                        "（参考样本结束后的帧才是当前待分析视频）"
+                    ),
+                })
+                rag_max_w = getattr(self.config, "accident_rag_max_width", 640)
+                for ep in exemplar_paths:
+                    contents.append({
+                        "type": "image_url",
+                        "image_url": {"url": image_to_base64_url(ep, max_width=rag_max_w, quality=75)},
+                    })
+                contents.append({"type": "text", "text": "--- 以下为当前待分析视频帧 ---"})
+                _safe_print(f"[ImageRAG] 注入 {len(exemplar_paths)} 张 {cam_type} exemplar 帧")
 
         # 根据模式确定帧数限制
         if mode == "FAST":

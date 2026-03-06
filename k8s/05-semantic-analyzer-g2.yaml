@@ -1,0 +1,75 @@
+# Semantic Analyzer Deployment - GPU 2 (CUDA MOG2 + FFmpeg NVDEC)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: semantic-analyzer-g2
+  namespace: traffic-vlm
+  labels:
+    app: semantic-analyzer
+    cuda-device: "2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: semantic-analyzer
+      cuda-device: "2"
+  template:
+    metadata:
+      labels:
+        app: semantic-analyzer
+        cuda-device: "2"
+    spec:
+      containers:
+      - name: analyzer
+        image: localhost:5000/semantic-analyzer:v11
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "redis.traffic-vlm.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: EMBEDDING_SERVICE_URL
+          value: "http://embedding-service.traffic-vlm.svc.cluster.local:8080"
+        - name: VLM_PROXY_URL
+          value: "http://vlm-proxy.traffic-vlm.svc.cluster.local:8001"
+        - name: RESULTS_DIR
+          value: "/data1/results"
+        - name: MAX_TASKS
+          value: "0"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "2"
+        - name: CUDA_DEVICE
+          value: "0"
+        - name: CLIP_SCORE_THRESHOLD
+          value: "0.35"
+        # MOG2 运动检测配置
+        - name: USE_MOG2_FILTER
+          value: "true"
+        - name: MOG2_FG_RATIO_THRESHOLD
+          value: "0.015"
+        - name: MOG2_ALWAYS_SAMPLE_INTERVAL
+          value: "5.0"
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: videos
+          mountPath: /data1/videos
+          readOnly: true
+        - name: results
+          mountPath: /data1/results
+      volumes:
+      - name: videos
+        persistentVolumeClaim:
+          claimName: pvc-videos
+      - name: results
+        persistentVolumeClaim:
+          claimName: pvc-results
