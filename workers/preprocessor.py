@@ -59,6 +59,10 @@ MOG2_LOWRES_FPS = float(os.getenv("MOG2_LOWRES_FPS", "12"))
 MOG2_DEBOUNCE_FRAMES = int(os.getenv("MOG2_DEBOUNCE_FRAMES", "3"))
 MOG2_ALWAYS_SAMPLE_INTERVAL = float(os.getenv("MOG2_ALWAYS_SAMPLE_INTERVAL", "5.0"))
 
+# 评测模式: 绕过运动检测过滤，均匀采样帧
+BYPASS_MOTION_FILTER = os.getenv("BYPASS_MOTION_FILTER", "").lower() in ("1", "true", "yes")
+BYPASS_SAMPLE_INTERVAL = float(os.getenv("BYPASS_SAMPLE_INTERVAL", "1.0"))  # 每秒采样1帧
+
 # SigLIP 模型配置
 SIGLIP_MODEL_PATH = os.getenv("SIGLIP_MODEL_PATH", "/data/models/siglip-base-patch16-384")
 
@@ -68,6 +72,9 @@ COMPRESS_QUALITY = int(os.getenv("COMPRESS_QUALITY", "85"))
 
 # 缓存配置
 CACHE_TTL = int(os.getenv("CACHE_TTL", "300"))  # 5 分钟
+
+# 帧存储目录 (共享 PVC, Analyzer 可访问)
+FRAMES_DIR = os.getenv("FRAMES_DIR", "/data1/frames")
 
 # CUDA MOG2 可用性
 _CUDA_MOG2_AVAILABLE = None
@@ -219,7 +226,10 @@ class PreProcessor:
             self.log.error(f"视频不存在: {video_path}", job_id=job_id)
             return frames, ""
 
-        tmpdir = Path(tempfile.mkdtemp())
+        # 使用共享 PVC 目录存储帧，Analyzer 可访问
+        frame_subdir = job_id if job_id else f"tmp_{int(time.time()*1000)}"
+        tmpdir = Path(FRAMES_DIR) / frame_subdir
+        tmpdir.mkdir(parents=True, exist_ok=True)
         proc = None
 
         try:
@@ -236,6 +246,7 @@ class PreProcessor:
             # 阶段1: FFmpeg NVDEC 低分辨率管道 + MOG2
             t0 = time.time()
 
+            # 首先尝试 NVDEC 硬件解码
             cmd = [
                 "ffmpeg",
                 "-hwaccel", "cuda",
@@ -243,20 +254,32 @@ class PreProcessor:
                 "-i", str(video_path),
                 "-vf", f"scale={MOG2_LOWRES_WIDTH}:{MOG2_LOWRES_HEIGHT},fps={MOG2_LOWRES_FPS}",
                 "-f", "rawvideo", "-pix_fmt", "bgr24",
-                "-v", "quiet", "-"
+                "-v", "error", "-"
             ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             frame_size = MOG2_LOWRES_WIDTH * MOG2_LOWRES_HEIGHT * 3
 
+            # 尝试初始化 CUDA MOG2，失败则回退到 CPU
+            actual_cuda_mog2 = False
+            bg_subtractor = None
+            cuda_stream = None
+            gpu_frame = None
+
             if use_cuda_mog2:
-                cv2.cuda.setDevice(int(CUDA_DEVICE))
-                bg_subtractor = cv2.cuda.createBackgroundSubtractorMOG2(
-                    history=400, varThreshold=16, detectShadows=True
-                )
-                cuda_stream = cv2.cuda.Stream()
-                gpu_frame = cv2.cuda_GpuMat()
-            else:
+                try:
+                    cv2.cuda.setDevice(int(CUDA_DEVICE))
+                    bg_subtractor = cv2.cuda.createBackgroundSubtractorMOG2(
+                        history=400, varThreshold=16, detectShadows=True
+                    )
+                    cuda_stream = cv2.cuda.Stream()
+                    gpu_frame = cv2.cuda_GpuMat()
+                    actual_cuda_mog2 = True
+                except Exception as cuda_err:
+                    self.log.warning(f"CUDA MOG2 初始化失败，回退到 CPU: {cuda_err}", job_id=job_id)
+                    actual_cuda_mog2 = False
+
+            if not actual_cuda_mog2:
                 bg_subtractor = cv2.createBackgroundSubtractorMOG2(
                     history=400, varThreshold=16, detectShadows=True
                 )
@@ -265,6 +288,7 @@ class PreProcessor:
             frame_idx = 0
             motion_streak = 0
             last_force_ts = -1e9
+            cuda_fallback_done = False
 
             while True:
                 raw = proc.stdout.read(frame_size)
@@ -276,16 +300,33 @@ class PreProcessor:
                 )
                 timestamp = frame_idx / MOG2_LOWRES_FPS
 
-                if use_cuda_mog2:
-                    gpu_frame.upload(frame)
-                    gpu_gray = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2GRAY)
-                    gpu_fg = bg_subtractor.apply(gpu_gray, -1, cuda_stream)
-                    fg_mask = gpu_fg.download()
-                else:
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    gray = cv2.GaussianBlur(gray, (3, 3), 0)
-                    fg_mask = bg_subtractor.apply(gray)
-                    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                try:
+                    if actual_cuda_mog2:
+                        gpu_frame.upload(frame)
+                        gpu_gray = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2GRAY)
+                        gpu_fg = bg_subtractor.apply(gpu_gray, -1, cuda_stream)
+                        fg_mask = gpu_fg.download()
+                    else:
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+                        fg_mask = bg_subtractor.apply(gray)
+                        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                except Exception as mog2_err:
+                    # CUDA MOG2 运行时失败，回退到 CPU
+                    if actual_cuda_mog2 and not cuda_fallback_done:
+                        self.log.warning(f"CUDA MOG2 运行失败，回退到 CPU: {mog2_err}", job_id=job_id)
+                        actual_cuda_mog2 = False
+                        cuda_fallback_done = True
+                        bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+                            history=400, varThreshold=16, detectShadows=True
+                        )
+                        # 重新处理当前帧
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+                        fg_mask = bg_subtractor.apply(gray)
+                        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                    else:
+                        raise
 
                 fg_ratio = np.count_nonzero(fg_mask) / fg_mask.size
 
@@ -308,8 +349,73 @@ class PreProcessor:
 
                 frame_idx += 1
 
-            proc.wait()
+            # 获取 FFmpeg stderr
+            _, ffmpeg_stderr = proc.communicate()
             t1 = time.time()
+
+            # 如果 NVDEC 失败（0 帧），尝试软件解码 + CPU MOG2
+            if frame_idx == 0 and ffmpeg_stderr:
+                stderr_text = ffmpeg_stderr.decode('utf-8', errors='ignore').strip()
+                if stderr_text:
+                    self.log.warning(f"NVDEC 失败: {stderr_text[:200]}", job_id=job_id)
+
+                # 回退到软件解码 + CPU MOG2
+                self.log.info("回退到软件解码 + CPU MOG2", job_id=job_id, trace_id=trace_id)
+                cmd_sw = [
+                    "ffmpeg",
+                    "-i", str(video_path),
+                    "-vf", f"scale={MOG2_LOWRES_WIDTH}:{MOG2_LOWRES_HEIGHT},fps={MOG2_LOWRES_FPS}",
+                    "-f", "rawvideo", "-pix_fmt", "bgr24",
+                    "-v", "error", "-"
+                ]
+                proc = subprocess.Popen(cmd_sw, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+                # 强制使用 CPU MOG2（避免 GPU 问题）
+                bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+                    history=400, varThreshold=16, detectShadows=True
+                )
+                motion_streak = 0
+                last_force_ts = -1e9
+
+                # 重新处理帧（纯 CPU）
+                while True:
+                    raw = proc.stdout.read(frame_size)
+                    if len(raw) != frame_size:
+                        break
+
+                    frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                        MOG2_LOWRES_HEIGHT, MOG2_LOWRES_WIDTH, 3
+                    )
+                    timestamp = frame_idx / MOG2_LOWRES_FPS
+
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+                    fg_mask = bg_subtractor.apply(gray)
+                    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+                    fg_ratio = np.count_nonzero(fg_mask) / fg_mask.size
+
+                    if fg_ratio >= MOG2_FG_RATIO_THRESHOLD:
+                        motion_streak += 1
+                    else:
+                        motion_streak = 0
+
+                    triggered = False
+                    if motion_streak >= MOG2_DEBOUNCE_FRAMES:
+                        triggered = True
+                        motion_streak = 0
+                    if timestamp - last_force_ts >= MOG2_ALWAYS_SAMPLE_INTERVAL:
+                        triggered = True
+                        last_force_ts = timestamp
+
+                    if triggered:
+                        orig_frame_idx = int(timestamp * orig_fps)
+                        trigger_frame_indices.append((orig_frame_idx, timestamp))
+
+                    frame_idx += 1
+
+                proc.communicate()
+                t1 = time.time()
 
             self.log.info(
                 f"阶段1 MOG2: {frame_idx} 帧 -> {len(trigger_frame_indices)} 触发点, "
@@ -318,8 +424,23 @@ class PreProcessor:
             )
 
             if not trigger_frame_indices:
-                self.log.warning("MOG2 无触发点，跳过", job_id=job_id)
-                return frames, str(tmpdir)
+                if BYPASS_MOTION_FILTER:
+                    # 评测模式: 绕过运动检测，均匀采样
+                    self.log.info(
+                        f"BYPASS_MOTION_FILTER: 无触发点但强制采样 (间隔={BYPASS_SAMPLE_INTERVAL}s)",
+                        job_id=job_id
+                    )
+                    # 使用均匀采样替代触发点
+                    for t in np.arange(0, duration, BYPASS_SAMPLE_INTERVAL):
+                        orig_idx = int(t * orig_fps)
+                        trigger_frame_indices.append((orig_idx, float(t)))
+                    # 限制最大帧数
+                    if len(trigger_frame_indices) > 30:
+                        step = len(trigger_frame_indices) // 30
+                        trigger_frame_indices = trigger_frame_indices[::step][:30]
+                else:
+                    self.log.warning("MOG2 无触发点，跳过", job_id=job_id)
+                    return frames, str(tmpdir)
 
             # 阶段2: FFmpeg NVDEC 仅提取触发帧
             t2 = time.time()
@@ -453,6 +574,8 @@ class PreProcessor:
             if tmpdir:
                 import shutil
                 shutil.rmtree(tmpdir, ignore_errors=True)
+            # 标记任务为完成（无帧）
+            self.redis.set_task_status(job_id, "done", self.consumer_name)
             return True
 
         # 2. 计算 Embedding

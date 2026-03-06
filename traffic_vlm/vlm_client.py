@@ -556,9 +556,15 @@ def _build_api_params(config, messages):
         api_params['max_tokens'] = config.max_tokens
     # Qwen3.5 thinking 模型：关闭思维链，直接输出 JSON
     if '3.5' in config.model or 'qwen3.5' in config.model.lower():
-        api_params['extra_body'] = {
-            "chat_template_kwargs": {"enable_thinking": False}
-        }
+        is_local_vllm = bool(os.getenv("VLLM_BASE_URL"))
+        if is_local_vllm:
+            # vLLM 本地部署：通过 chat_template_kwargs 禁用思维链
+            api_params['extra_body'] = {
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
+        else:
+            # DashScope 云端：直接传 enable_thinking=False
+            api_params['extra_body'] = {"enable_thinking": False}
     return api_params
 
 

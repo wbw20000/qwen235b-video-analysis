@@ -342,6 +342,14 @@ class TrafficVLMPipeline:
             # 使用缓存的预处理数据，跳过 Stage A
             preprocessed_clips = _preprocess_cache["preprocessed_clips"]
             skipped_clips = _preprocess_cache.get("skipped_clips", [])
+
+            # 消融 skip_metadata：缓存中可能含 metadata_text，需清空
+            if not self.config.progressive_vlm.include_object_metadata_text:
+                for _p in preprocessed_clips:
+                    _p["metadata_text_fast"] = ""
+                    _p["metadata_text_escalated"] = ""
+                print("[pipeline] [skip-metadata] 已清空缓存中的 metadata_text")
+
             final_results = []
             vlm_client = VLMClient(self.config.vlm)
             accident_query = (mode == "accident")
