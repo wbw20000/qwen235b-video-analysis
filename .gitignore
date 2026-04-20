@@ -33,3 +33,8 @@ Thumbs.db
 *.bak
 *.bak[0-9]*
 *.orig
+
+# env 文件（含密钥，绝不入库）
+.env
+.env.*
+.env_*

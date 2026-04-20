@@ -1,0 +1,26 @@
+# 排除大文件和非必要目录
+models/
+data/
+outputs/
+uploads/
+venv/
+*.mp4
+*.avi
+*.mkv
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+*.log
+*.pyc
+__pycache__/
+.git/
+k8s/
+docs/
+evaluation/
+reporting/
+tools/
+tests/
+*.md
+nohup.out
