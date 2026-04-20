@@ -12,6 +12,7 @@ import time
 import signal
 import subprocess
 import argparse
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -21,9 +22,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from workers.common.logging_config import setup_logger, LogContext
 
 # 配置
-SEGMENT_DURATION_SEC = 600  # 10 分钟
+SEGMENT_DURATION_SEC = 60   # 60 秒实时监测
 MAX_SEGMENTS_BEFORE_EXIT = 50  # 自愈：处理 50 个分片后退出
 RECONNECT_DELAY_SEC = 5
+RETAIN_HOURS = float(os.getenv("RTSP_RETAIN_HOURS", "2"))  # 保留最近 N 小时的分片
+
+# 存储配置
+PRIMARY_STORAGE = os.getenv("PRIMARY_STORAGE", "/data1/videos/rtsp_recordings")
+FALLBACK_STORAGE = os.getenv("FALLBACK_STORAGE", "/data/videos/rtsp_recordings")
+STORAGE_THRESHOLD_GB = float(os.getenv("STORAGE_THRESHOLD_GB", "100"))  # 剩余空间低于此值时切换
 
 
 class RTSPIngest:
@@ -38,12 +45,15 @@ class RTSPIngest:
     ):
         self.camera_id = camera_id
         self.rtsp_url = rtsp_url
-        self.output_dir = Path(output_dir) / camera_id
+        self.base_output_dir = output_dir  # 原始指定目录
         self.segment_duration = segment_duration
         self.segment_count = 0
         self.running = True
         self.logger = setup_logger("rtsp-ingest")
         self.log = LogContext(self.logger, camera_id=camera_id, stage="ingest")
+
+        # 自动选择存储路径
+        self.output_dir = self._select_storage_path()
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -51,6 +61,58 @@ class RTSPIngest:
         # 信号处理
         signal.signal(signal.SIGTERM, self._handle_signal)
         signal.signal(signal.SIGINT, self._handle_signal)
+
+    def _get_free_space_gb(self, path: Path) -> float:
+        """获取指定路径的剩余空间（GB）"""
+        try:
+            # 确保路径存在，获取其挂载点
+            check_path = path
+            while not check_path.exists():
+                check_path = check_path.parent
+                if check_path == check_path.parent:  # 到根目录
+                    break
+            usage = shutil.disk_usage(check_path)
+            return usage.free / (1024 ** 3)  # 转换为 GB
+        except Exception as e:
+            self.log.error(f"获取磁盘空间失败 {path}: {e}")
+            return 0
+
+    def _select_storage_path(self) -> Path:
+        """
+        自动选择存储路径:
+        1. 优先使用主存储 (/data1)
+        2. 如果主存储剩余空间 < 阈值，切换到备用存储 (/data)
+        """
+        primary_path = Path(PRIMARY_STORAGE) / self.camera_id
+        fallback_path = Path(FALLBACK_STORAGE) / self.camera_id
+
+        primary_free = self._get_free_space_gb(Path(PRIMARY_STORAGE))
+
+        if primary_free >= STORAGE_THRESHOLD_GB:
+            self.log.info(
+                f"使用主存储: {primary_path} (剩余 {primary_free:.1f}GB)"
+            )
+            return primary_path
+        else:
+            # 检查备用存储
+            fallback_free = self._get_free_space_gb(Path(FALLBACK_STORAGE))
+            self.log.warning(
+                f"主存储空间不足 ({primary_free:.1f}GB < {STORAGE_THRESHOLD_GB}GB)，"
+                f"切换到备用存储: {fallback_path} (剩余 {fallback_free:.1f}GB)"
+            )
+            return fallback_path
+
+    def _check_and_switch_storage(self):
+        """检查当前存储空间，必要时切换"""
+        current_free = self._get_free_space_gb(self.output_dir.parent)
+        if current_free < STORAGE_THRESHOLD_GB:
+            new_path = self._select_storage_path()
+            if new_path != self.output_dir:
+                self.log.warning(
+                    f"存储切换: {self.output_dir} -> {new_path} (剩余 {current_free:.1f}GB)"
+                )
+                self.output_dir = new_path
+                self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _handle_signal(self, signum, frame):
         self.log.info(f"收到信号 {signum}，准备退出")
@@ -104,6 +166,34 @@ class RTSPIngest:
             self.log.error(f"录制异常: {e}")
             return False
 
+    def _cleanup_old_segments(self):
+        """
+        清理超过保留时间的旧分片
+        文件名格式: seg_{timestamp}.mp4
+        """
+        if RETAIN_HOURS <= 0:
+            return  # 禁用清理
+
+        cutoff_ts = int(time.time()) - int(RETAIN_HOURS * 3600)
+        deleted_count = 0
+
+        try:
+            for f in self.output_dir.glob("seg_*.mp4"):
+                # 从文件名提取时间戳
+                try:
+                    ts_str = f.stem.split("_")[1]
+                    file_ts = int(ts_str)
+                    if file_ts < cutoff_ts:
+                        f.unlink()
+                        deleted_count += 1
+                except (IndexError, ValueError):
+                    continue  # 跳过格式不对的文件
+
+            if deleted_count > 0:
+                self.log.info(f"清理旧分片: 删除 {deleted_count} 个 (保留 {RETAIN_HOURS}h)")
+        except Exception as e:
+            self.log.error(f"清理旧分片失败: {e}")
+
     def _atomic_rename(self, tmp_path: Path, final_path: Path) -> bool:
         """
         原子重命名：确保文件完整后才可见
@@ -154,6 +244,10 @@ class RTSPIngest:
                     self.log.info(
                         f"已完成 {self.segment_count}/{MAX_SEGMENTS_BEFORE_EXIT} 分片"
                     )
+                    # 每 10 个分片检查存储空间并清理旧文件
+                    if self.segment_count % 10 == 0:
+                        self._check_and_switch_storage()
+                        self._cleanup_old_segments()
             else:
                 # 录制失败，清理临时文件并重试
                 if tmp_path.exists():

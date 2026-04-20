@@ -334,7 +334,7 @@ class Aggregator:
 
         while self.running:
             # 检查自愈阈值
-            if self.task_count >= MAX_TASKS_BEFORE_EXIT:
+            if MAX_TASKS_BEFORE_EXIT > 0 and self.task_count >= MAX_TASKS_BEFORE_EXIT:
                 log.info(f"达到自愈阈值 ({MAX_TASKS_BEFORE_EXIT})，准备退出")
                 break
 

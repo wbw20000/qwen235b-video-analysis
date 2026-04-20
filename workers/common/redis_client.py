@@ -103,6 +103,7 @@ class ResultTask:
     is_positive: bool = False  # 新增: 通用阳性标志（违法/事故/异常行为）
     violation_type: str = None  # 新增: 违法类型 (用于 mv_violation/ebike_violation)
     behavior_type: str = None  # 新增: 行为类型 (用于 ads_behavior)
+    processing_time_sec: float = 0.0  # 实际处理耗时(秒)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -128,7 +129,8 @@ class ResultTask:
             analysis_type=data.get("analysis_type", "accident"),
             is_positive=data.get("is_positive", "0") == "1",
             violation_type=data.get("violation_type") if data.get("violation_type") != "None" else None,
-            behavior_type=data.get("behavior_type") if data.get("behavior_type") != "None" else None
+            behavior_type=data.get("behavior_type") if data.get("behavior_type") != "None" else None,
+            processing_time_sec=float(data.get("processing_time_sec", 0.0)),
         )
 
 
@@ -140,7 +142,7 @@ class RedisStreamClient:
     STREAM_EDGE_EVENTS = "edge_events"  # 边缘触发事件队列
     STREAM_DLQ = "dlq_tasks"
 
-    MAX_STREAM_LEN = 10000
+    MAX_STREAM_LEN = 0  # 0 = no limit
     STATUS_TTL = 7 * 24 * 3600  # 7 days
 
     def __init__(
@@ -183,7 +185,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_VIDEO_TASKS,
             task.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         # 更新任务状态
         self.set_task_status(task.job_id, "pending")
@@ -235,6 +237,27 @@ class RedisStreamClient:
         """确认视频任务处理完成"""
         self.client.xack(self.STREAM_VIDEO_TASKS, group, msg_id)
 
+    def delete_consumer(self, stream: str, group: str, consumer: str) -> int:
+        """删除消费者（优雅退出时清理）
+
+        Args:
+            stream: Stream 名称
+            group: Consumer Group 名称
+            consumer: Consumer 名称
+
+        Returns:
+            删除的 pending 消息数量
+        """
+        try:
+            return self.client.xgroup_delconsumer(stream, group, consumer)
+        except Exception as e:
+            # 如果删除失败（如消费者不存在），忽略错误
+            return 0
+
+    def delete_video_consumer(self, group: str, consumer: str) -> int:
+        """删除 video_tasks 的消费者"""
+        return self.delete_consumer(self.STREAM_VIDEO_TASKS, group, consumer)
+
     # === result_tasks 操作 ===
 
     def add_result_task(self, task: ResultTask) -> str:
@@ -242,7 +265,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_RESULT_TASKS,
             task.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         return msg_id
 
@@ -281,7 +304,7 @@ class RedisStreamClient:
         msg_id = self.client.xadd(
             self.STREAM_EDGE_EVENTS,
             event.to_dict(),
-            maxlen=self.MAX_STREAM_LEN
+            maxlen=self.MAX_STREAM_LEN or None
         )
         return msg_id
 
