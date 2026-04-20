@@ -1,4 +1,4 @@
-# 电动自行车违法检测分析器 v2 Deployment
+# 电动自行车违法检测分析器 v2 Deployment (CUDA MOG2 + FFmpeg NVDEC)
 # 使用 ebike_v2_analyzer.py - 包含 margin 评分、Top-M 门控、摄像头冷却
 apiVersion: apps/v1
 kind: Deployment
@@ -9,7 +9,7 @@ metadata:
     app: ebike-v2-analyzer
     analysis-type: ebike_violation
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: ebike-v2-analyzer
@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: analyzer
-        image: localhost:5000/semantic-analyzer:v8
+        image: localhost:5000/semantic-analyzer:v11
         imagePullPolicy: Always
         command: ["python", "-m", "workers.ebike_v2_analyzer"]
         env:
@@ -36,7 +36,11 @@ spec:
         - name: RESULTS_DIR
           value: "/data1/results"
         - name: MAX_TASKS
-          value: "50"
+          value: "0"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "2"
+        - name: CUDA_DEVICE
+          value: "0"
         - name: CLIP_SCORE_THRESHOLD
           value: "0.35"
         # MOG2 运动检测配置
@@ -46,10 +50,6 @@ spec:
           value: "0.015"
         - name: MOG2_ALWAYS_SAMPLE_INTERVAL
           value: "5.0"
-        - name: FFMPEG_NVDEC_ENABLED
-          value: "true"
-        - name: FFMPEG_NVDEC_DEVICE
-          value: "1"  # 使用 GPU 1
         - name: HOSTNAME
           valueFrom:
             fieldRef:

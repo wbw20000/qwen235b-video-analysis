@@ -1,4 +1,4 @@
-# 自动驾驶行为检测分析器 Deployment
+# 自动驾驶行为检测分析器 Deployment (CUDA MOG2 + FFmpeg NVDEC)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +8,7 @@ metadata:
     app: ads-behavior-analyzer
     analysis-type: ads_behavior
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: ads-behavior-analyzer
@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: analyzer
-        image: localhost:5000/semantic-analyzer:v8
+        image: localhost:5000/semantic-analyzer:v11
         imagePullPolicy: Always
         command: ["python", "-m", "workers.ads_behavior_analyzer"]
         env:
@@ -35,9 +35,13 @@ spec:
         - name: RESULTS_DIR
           value: "/data1/results"
         - name: MAX_TASKS
-          value: "50"
+          value: "0"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "3"
+        - name: CUDA_DEVICE
+          value: "0"
         - name: CLIP_SCORE_THRESHOLD
-          value: "0.30"  # 稍低阈值，提高示廓灯检测灵敏度
+          value: "0.30"
         # MOG2 运动检测配置
         - name: USE_MOG2_FILTER
           value: "true"
@@ -45,10 +49,6 @@ spec:
           value: "0.015"
         - name: MOG2_ALWAYS_SAMPLE_INTERVAL
           value: "5.0"
-        - name: FFMPEG_NVDEC_ENABLED
-          value: "true"
-        - name: FFMPEG_NVDEC_DEVICE
-          value: "2"  # 使用 GPU 2
         - name: HOSTNAME
           valueFrom:
             fieldRef:

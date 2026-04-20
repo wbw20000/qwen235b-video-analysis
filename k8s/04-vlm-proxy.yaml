@@ -24,7 +24,7 @@ spec:
           name: http
         env:
         - name: VLLM_BASE_URL
-          value: "http://vllm-server.traffic-vlm.svc.cluster.local:8000/v1"
+          value: "http://100.123.59.56:8000/v1"
         - name: MAX_CONCURRENT
           value: "2"
         - name: REQUEST_TIMEOUT

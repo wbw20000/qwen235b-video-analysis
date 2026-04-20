@@ -31,7 +31,7 @@ spec:
         - name: RESULTS_DIR
           value: "/data1/results"
         - name: MAX_TASKS
-          value: "50"
+          value: "0"
         - name: HOSTNAME
           valueFrom:
             fieldRef:
