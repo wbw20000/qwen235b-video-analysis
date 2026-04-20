@@ -1,16 +1,22 @@
-# RTSP Ingest 镜像 (CPU)
-FROM traffic-vlm-base:latest
+# RTSP Ingest 专用轻量镜像
+# 仅需 ffmpeg + Python, 无需 CUDA/PyTorch
+FROM python:3.10-slim
 
 LABEL service="rtsp-ingest"
-LABEL description="RTSP stream recording with 10-min segments"
+LABEL description="RTSP stream recording with ffmpeg remux"
+LABEL version="v2"
 
-USER root
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TZ=Asia/Shanghai
 
-# Python 依赖
-COPY docker/requirements-ingest.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+# 系统依赖: 只装 ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends     ffmpeg     && rm -rf /var/lib/apt/lists/*
 
-# 复制代码
+WORKDIR /app
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+
+# 复制代码 (rtsp_ingest 不需要 pip 依赖, 全是标准库)
 COPY --chown=appuser:appuser workers/ /app/workers/
 
 USER appuser
@@ -19,11 +25,6 @@ USER appuser
 ENV CAMERA_ID=unknown
 ENV RTSP_URL=
 ENV OUTPUT_DIR=/data1/videos/rtsp_recordings
-ENV SEGMENT_DURATION=600
-ENV REDIS_HOST=redis
-ENV REDIS_PORT=6379
+ENV SEGMENT_DURATION=60
 
-# 无端口暴露（只写文件）
-
-# 启动命令（需通过环境变量或参数指定 camera-id 和 rtsp-url）
 CMD ["python", "-m", "workers.rtsp_ingest"]
